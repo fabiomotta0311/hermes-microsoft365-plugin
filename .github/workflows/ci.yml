@@ -20,6 +20,7 @@ jobs:
       - name: Install exact tested toolchain
         run: |
           python -m pip install --upgrade "pip==25.2"
+          python -m pip install "hermes-agent @ git+https://github.com/NousResearch/hermes-agent.git@948e9706618220839a20c33c2fc5c19de074d835"
           python -m pip install -e ".[test]"
           python -m pip check
           python - <<'PY'
@@ -29,6 +30,8 @@ jobs:
               "msgraph-sdk": "1.62.0",
               "azure-identity": "1.25.3",
               "microsoft-kiota-abstractions": "1.12.3",
+              "microsoft-kiota-http": "1.12.3",
+              "microsoft-kiota-serialization-json": "1.12.3",
           }
           for package, version in expected.items():
               actual = metadata.version(package)
@@ -40,9 +43,13 @@ jobs:
         run: |
           python -m hermes_cli.plugin_validate microsoft365
           hermes plugins doctor microsoft365 --ci
-      - name: Compile
-        run: python -m compileall -q microsoft365
+      - name: Compile and build package
+        run: |
+          python -m compileall -q microsoft365
+          python -m pip wheel . --no-deps --wheel-dir dist
       - name: Secret scan
-        run: python -m detect_secrets scan --all-files --exclude-files '(^|/)uv\.lock$'
+        run: |
+          detect-secrets scan > "$RUNNER_TEMP/secrets.json"
+          python -c 'import json, os; p=os.path.join(os.environ["RUNNER_TEMP"], "secrets.json"); data=json.load(open(p)); assert not data["results"], data["results"]'
       - name: Diff hygiene
         run: git diff --check
