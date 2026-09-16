@@ -39,6 +39,7 @@ def test_capabilities_accept_only_real_booleans_and_known_names():
 
     settings = Settings.from_mapping({"capabilities": {"outlook": {"search": True, "send": False}}})
     assert settings.selected("outlook") == {"search"}
+    assert Settings.from_mapping({"capabilities": {"outlook": False}}).selected("outlook") == set()
 
     for malformed in ("false", 0, 1, None, []):
         with pytest.raises(ConfigurationError, match="must be a boolean or operation mapping"):

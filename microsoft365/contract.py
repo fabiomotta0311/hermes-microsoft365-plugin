@@ -116,6 +116,9 @@ class Settings:
             if service_value is True:
                 normalized[service] = {operation: True for operation in OPERATIONS[service]}
                 continue
+            if service_value is False:
+                normalized[service] = {operation: False for operation in OPERATIONS[service]}
+                continue
             if not isinstance(service_value, Mapping):
                 raise ConfigurationError(
                     f"capabilities.{service} must be a boolean or operation mapping "
