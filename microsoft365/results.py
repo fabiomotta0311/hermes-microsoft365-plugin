@@ -1,6 +1,7 @@
 """Sanitized Graph model and binary result normalization."""
 from __future__ import annotations
 
+import base64
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
@@ -18,6 +19,30 @@ class BinaryResult:
     content_type: str
     size: int
     name: str | None = None
+
+
+def binary_result(payload, *, content_type: str, name: str | None = None) -> BinaryResult:
+    """Build the exact-byte carrier for a binary payload.
+
+    Base64 is an integrity-bearing transport field, so it is encoded here -- the single
+    place it is produced -- and :func:`normalize_result` recognizes the carrier *before* any
+    string rule applies, which is what keeps a large file intact instead of being truncated
+    as text. The empty payload is a valid file: it keeps an empty ``content_base64`` rather
+    than a missing one, so "no file" and "zero bytes" never look alike.
+    """
+    if not isinstance(payload, (bytes, bytearray, memoryview)):
+        raise TypeError("payload must be bytes")
+    normalized_type = str(content_type or "").strip()
+    if not normalized_type:
+        raise ValueError("content_type is required")
+    data = bytes(payload)
+    normalized_name = str(name).strip() if name is not None else ""
+    return BinaryResult(
+        content_base64=base64.b64encode(data).decode("ascii"),
+        content_type=normalized_type,
+        size=len(data),
+        name=normalized_name or None,
+    )
 
 
 def normalize_collection_page(
