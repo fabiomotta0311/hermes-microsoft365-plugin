@@ -65,6 +65,17 @@ See [Known limitations](docs/known-limitations.md). In particular:
 - no workaround is included for the Hermes host approval modification-order defect; safe write execution depends on the separate generic core fix;
 - no catalog entry or release claim is made by this milestone.
 
+## Version
+
+`pyproject.toml` is the single source of truth for the version. `microsoft365/plugin.yaml` must
+declare that **exact same string** — already in PEP 440 canonical form (`0.1.0a1`, never the
+equivalent-looking `0.1.0-alpha.1`), so the manifest always matches the metadata of the built wheel.
+
+The Hermes host reads the manifest `version` for display only (`plugins list`, install/update
+messages) and imposes no spelling requirement, so no legacy form needs preserving.
+`tests/test_manifest.py` enforces the agreement against both `pyproject.toml` and, when the
+distribution is installed, `importlib.metadata`.
+
 ## Development
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues should follow [SECURITY.md](SECURITY.md).
