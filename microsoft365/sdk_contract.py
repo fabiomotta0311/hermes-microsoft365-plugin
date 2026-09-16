@@ -157,7 +157,7 @@ def build_item_request_information(
             .todo.lists.by_todo_task_list_id(_required(todo_list_id, "todo_list_id"))
             .tasks.by_todo_task_id(_required(todo_task_id, "todo_task_id"))
         )
-        return _request(builder, select=fields)
+        return _request(builder, select=_todo_task_select(fields))
     if case == "planner_read":
         builder = client.planner.tasks.by_planner_task_id(_required(planner_task_id, "planner_task_id"))
         return _request(builder, select=fields)
@@ -267,6 +267,119 @@ def _partial_model(model_class, fields, case: str):
     return model_class(**fields)
 
 
+# --------------------------------------------------------------------------------------
+# Microsoft To Do semantics (WP3)
+# --------------------------------------------------------------------------------------
+#
+# Two verified offline facts drive this section:
+#
+# * the generated ``TodoTask`` model has no ``subject`` property (To Do uses ``title``), and
+#   its deserializers are the exact set of Graph wire names the model declares, so a
+#   ``$select`` naming anything else is refused instead of being sent and ignored;
+# * Kiota's JSON writer emits **nothing** for an enum-typed field whose value is not one of
+#   the generated ``TaskStatus`` members -- a plain ``"inProgress"`` string serializes to
+#   ``{}`` -- so a status has to be mapped to the generated member before the body is built.
+
+
+def todo_task_field_names() -> frozenset[str]:
+    """The Graph wire names the generated ``TodoTask`` model actually declares.
+
+    Read from the generated model's own deserializers, never hand-written: ``subject`` is
+    absent from the set because no To Do model has that property, so it cannot be selected
+    or written through this plugin.
+    """
+    from msgraph.generated.models.todo_task import TodoTask
+
+    return frozenset(TodoTask().get_field_deserializers())
+
+
+def todo_task_status(value):
+    """Map a caller-supplied status to the generated ``TaskStatus`` enum member.
+
+    A generated member passes through unchanged and a string is mapped to the member it
+    names. A value the generated enum does not declare is refused, listing the members the
+    SDK actually has, rather than being handed to the writer -- which would drop the field
+    from the request body without a word.
+    """
+    from msgraph.generated.models.task_status import TaskStatus
+
+    if isinstance(value, TaskStatus):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip()
+        if normalized:
+            try:
+                return TaskStatus(normalized)
+            except ValueError:
+                pass
+    members = ", ".join(member.value for member in TaskStatus)
+    raise ValueError(f"status must be one of the generated TaskStatus members: {members}")
+
+
+def todo_task_status_matches(task_status, requested) -> bool:
+    """Match one task's status client-side against a requested one.
+
+    The endpoint's acceptance of a ``$filter`` on ``status`` is not recorded offline, so no
+    such filter is sent and the comparison happens here, limited to the tasks the caller has
+    already retrieved. A task with no status, or one whose value the generated enum does not
+    declare, never matches.
+    """
+    from msgraph.generated.models.task_status import TaskStatus
+
+    wanted = todo_task_status(requested)
+    if isinstance(task_status, TaskStatus):
+        return task_status is wanted
+    if isinstance(task_status, str):
+        normalized = task_status.strip()
+        if normalized:
+            try:
+                return TaskStatus(normalized) is wanted
+            except ValueError:
+                return False
+    return False
+
+
+def _todo_task_select(fields):
+    """Refuse a ``$select`` naming a field the generated ``TodoTask`` model does not have.
+
+    A selection the model cannot return is silently ignored by Graph, so it is refused here
+    with the case name instead of producing a request that drops the caller's intent.
+    """
+    if fields is None:
+        return None
+    declared = todo_task_field_names()
+    for name in fields:
+        if name not in declared:
+            raise ValueError(f"unknown field for todo_read: {name}")
+    return fields
+
+
+def _todo_task_write_model(case: str, fields):
+    """Build the real generated ``TodoTask`` a To Do write sends.
+
+    The field policy lives in ``microsoft365/contract.py``, so a field the endpoint does not
+    accept is refused before the SDK is reached, and the model is built from real generated
+    values only: ``status`` is mapped to its enum member, and the model-valued fields are
+    type-checked so a plain string cannot reach the serializer as an attribute error.
+    """
+    from msgraph.generated.models.date_time_time_zone import DateTimeTimeZone
+    from msgraph.generated.models.item_body import ItemBody
+    from msgraph.generated.models.todo_task import TodoTask
+
+    from .contract import validate_todo_task_fields
+
+    accepted = dict(validate_todo_task_fields(case, fields))
+    if "title" in accepted:
+        accepted["title"] = _required(accepted["title"], "title")
+    if "body" in accepted and not isinstance(accepted["body"], ItemBody):
+        raise ValueError(f"body of {case} must be an ItemBody")
+    if "due_date_time" in accepted and not isinstance(accepted["due_date_time"], DateTimeTimeZone):
+        raise ValueError(f"due_date_time of {case} must be a DateTimeTimeZone")
+    if "status" in accepted:
+        accepted["status"] = todo_task_status(accepted["status"])
+    return TodoTask(**accepted)
+
+
 WRITE_CASES: tuple[str, ...] = (
     "outlook_create_draft",
     "outlook_send",
@@ -311,6 +424,7 @@ def build_write_request_information(
     end=None,
     title: str = "",
     due_date_time=None,
+    status=None,
     save_to_sent_items=None,
     etag: str = "",
     query: str = "",
@@ -374,29 +488,28 @@ def build_write_request_information(
             _partial_model(Event, update_fields, case), RequestConfiguration(headers=_headers(**{"If-Match": etag}))
         )
     if case == "todo_create_tasks":
-        from msgraph.generated.models.todo_task import TodoTask
-
         builder = client.users.by_user_id(_required(user_id, "user_id")).todo.lists.by_todo_task_list_id(
             _required(todo_list_id, "todo_list_id")
         ).tasks
-        task = TodoTask(title=_required(title, "title"))
+        fields: dict[str, object] = {"title": _required(title, "title")}
         if content:
-            task.body = _item_body(content, content_type)
+            fields["body"] = _item_body(content, content_type)
         if due_date_time is not None:
-            task.due_date_time = due_date_time
+            fields["due_date_time"] = due_date_time
+        if status is not None:
+            fields["status"] = status
         return builder.to_post_request_information(
-            task, RequestConfiguration(headers=_headers())
+            _todo_task_write_model(case, fields),
+            RequestConfiguration(headers=_headers()),
         )
     if case == "todo_update_tasks":
-        from msgraph.generated.models.todo_task import TodoTask
-
         builder = (
             client.users.by_user_id(_required(user_id, "user_id"))
             .todo.lists.by_todo_task_list_id(_required(todo_list_id, "todo_list_id"))
             .tasks.by_todo_task_id(_required(todo_task_id, "todo_task_id"))
         )
         return builder.to_patch_request_information(
-            _partial_model(TodoTask, update_fields, case),
+            _todo_task_write_model(case, update_fields),
             RequestConfiguration(headers=_headers(**{"If-Match": etag})),
         )
     if case == "planner_create_tasks":
