@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
-_SECRET_PARTS = ("secret", "token", "authorization", "cookie", "password", "api_key", "apikey")
+from .errors import GraphError, is_sensitive_key, is_structural_key, to_graph_error
+
 _MODEL_FIELDS = (
     "id", "name", "display_name", "subject", "title", "content", "size", "web_url",
     "created_date_time", "last_modified_date_time", "status", "plan_id", "bucket_id",
@@ -17,11 +18,6 @@ class BinaryResult:
     content_type: str
     size: int
     name: str | None = None
-
-
-def _secret_key(key: Any) -> bool:
-    normalized = str(key).lower().replace("-", "_")
-    return any(part in normalized for part in _SECRET_PARTS)
 
 
 def normalize_collection_page(
@@ -71,6 +67,12 @@ def normalize_result(
     if isinstance(value, BinaryResult):
         # Base64 is an integrity-bearing transport field, not display text.
         return {key: item for key, item in asdict(value).items() if item is not None}
+    if isinstance(value, GraphError):
+        return value.to_result()
+    if isinstance(value, BaseException):
+        # A raw SDK/Graph/Azure exception is never rendered as text: it goes through the
+        # canonical taxonomy, which never copies its message, headers, body or request.
+        return to_graph_error(value).to_result()
     if _seen is None:
         _seen = set()
     if _depth > max_depth:
@@ -98,9 +100,11 @@ def normalize_result(
         if isinstance(value, Mapping):
             output = {}
             for key, item in list(value.items())[:max_items]:
-                output[str(key)] = "[REDACTED]" if _secret_key(key) or str(key).lower() in {
-                    "headers", "request_information", "response"
-                } else recurse(item)
+                # Redaction rules live in the canonical taxonomy module, so the error path
+                # and the result path can never drift apart.
+                output[str(key)] = (
+                    "[REDACTED]" if is_sensitive_key(key) or is_structural_key(key) else recurse(item)
+                )
             return output
         if isinstance(value, (list, tuple, set)):
             return [recurse(item) for item in list(value)[:max_items]]
