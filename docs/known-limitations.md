@@ -23,7 +23,7 @@ Hermes currently has a generic approval modification-order defect described in t
 ## Files and pagination
 
 - The offline foundation verifies generated drive collection request information and binary normalization, not complete path-based `/content` upload/download behavior.
-- Multi-page Graph traversal, authenticated next-link validation, cycle detection, and global result caps remain open.
+- Multi-page Graph traversal is implemented as an offline helper with authenticated next-link validation, cycle detection and a global page cap (`microsoft365/paging.py`, WP5). No executable operation consumes it yet, so multi-page behavior against Graph remains unverified.
 - The 10 MiB simple-transfer product contract is retained in metadata, but large-file upload sessions are not implemented.
 
 ## Delivery
