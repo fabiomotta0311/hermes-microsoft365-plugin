@@ -66,3 +66,67 @@ def test_supported_action_enum_never_becomes_empty():
     unsupported_only = Settings.from_mapping({"capabilities": {"teams": {"send_messages": True}}})
     assert active_actions(unsupported_only, "teams") == ()
     assert schema_for("teams", ()) is None
+
+
+def test_every_operation_records_its_endpoint_write_class_and_statuses():
+    """WP13: the per-mode matrix adds fields; nothing may be left implicit."""
+    from microsoft365.contract import (
+        IMPLEMENTATION_STATUS_LABELS,
+        OPERATION_REGISTRY,
+        PLANNER_OPERATIONS,
+        REMOTE_VERIFICATION_STATUSES,
+        TODO_OPERATIONS,
+        WRITE_OPERATIONS,
+    )
+
+    assert REMOTE_VERIFICATION_STATUSES == frozenset({"not_tested", "verified"})
+    verified = {
+        key
+        for key, definition in OPERATION_REGISTRY.items()
+        if definition.implementation_status == "contract_verified"
+    }
+    assert verified == set(PLANNER_OPERATIONS) | set(TODO_OPERATIONS)
+
+    for key, definition in OPERATION_REGISTRY.items():
+        service, operation = key.split(".", 1)
+        assert (definition.service, definition.operation) == (service, operation), key
+        assert definition.write is (operation in WRITE_OPERATIONS), key
+        assert definition.implementation_status in IMPLEMENTATION_STATUS_LABELS, key
+        assert definition.remote_verification == "not_tested", key
+        assert definition.executable is False, key
+        assert definition.app.mode == "application", key
+        assert definition.delegated.mode == "delegated", key
+        assert definition.endpoint == "; ".join(definition.endpoints), key
+        if key in verified:
+            assert definition.endpoints, key
+        else:
+            # No endpoint table is declared for this service yet (WP1/WP6-WP9 add them):
+            # the endpoint is reported as unrecorded rather than invented.
+            assert definition.endpoints == (), key
+
+
+def test_application_support_status_is_recorded_per_operation():
+    """The application support status now lives in the registry, per operation."""
+    from microsoft365.contract import OPERATION_REGISTRY, TODO_WRITE_OPERATIONS
+
+    assert OPERATION_REGISTRY["outlook.search"].app.status == "supported"
+    assert OPERATION_REGISTRY["outlook.search"].app.permissions == ("Mail.Read",)
+    assert OPERATION_REGISTRY["teams.send_messages"].app.status == "unsupported_auth_mode"
+    assert OPERATION_REGISTRY["teams.send_messages"].app.permissions == ()
+
+    unsupported = {
+        key
+        for key, definition in OPERATION_REGISTRY.items()
+        if definition.app.status == "unsupported_auth_mode"
+    }
+    assert unsupported == {"teams.search_messages", "teams.send_messages"}
+    not_verified = {
+        key for key, definition in OPERATION_REGISTRY.items() if definition.app.status == "not_verified"
+    }
+    assert not_verified == set(TODO_WRITE_OPERATIONS)
+
+    for key, definition in OPERATION_REGISTRY.items():
+        if definition.app.status not in {"unsupported_auth_mode", "not_verified"}:
+            assert definition.app.status == "supported", key
+            assert definition.app.permissions, key
+        assert definition.delegated.status == "not_implemented", key
