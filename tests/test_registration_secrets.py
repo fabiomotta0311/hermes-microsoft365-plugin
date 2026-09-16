@@ -60,6 +60,28 @@ def test_preflight_reads_secret_presence_through_secret_scope_only(monkeypatch):
     assert result["remote_verification"] == "not_tested"
 
 
+def test_client_creation_resolves_secret_only_at_execution(monkeypatch):
+    import agent.secret_scope
+    import azure.identity
+    import msgraph
+    from microsoft365.client import create_graph_client
+    from microsoft365.contract import Settings
+
+    calls = []
+    credentials = []
+    clients = []
+    monkeypatch.setattr(agent.secret_scope, "get_secret", lambda name, default=None: calls.append(name) or "sentinel")
+    monkeypatch.setattr(azure.identity, "ClientSecretCredential", lambda **kwargs: credentials.append(kwargs) or "credential")
+    monkeypatch.setattr(msgraph, "GraphServiceClient", lambda **kwargs: clients.append(kwargs) or "client")
+
+    result = create_graph_client(Settings(tenant_id="tenant", client_id="client"))
+
+    assert result == "client"
+    assert calls == ["MICROSOFT365_CLIENT_SECRET"]
+    assert credentials == [{"tenant_id": "tenant", "client_id": "client", "client_secret": "sentinel"}]
+    assert clients == [{"credentials": "credential", "scopes": ["https://graph.microsoft.com/.default"]}]
+
+
 def test_unsupported_only_selection_is_retained_but_not_registered():
     from microsoft365 import register
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from kiota_abstractions.request_adapter import RequestAdapter
@@ -79,7 +80,7 @@ def test_real_generated_collection_builder_accepts_typed_configuration(
     )
 
     assert request.http_method.value == "GET"
-    assert request.url.path == expected_path
+    assert urlsplit(request.url).path == expected_path
     assert request.query_parameters == expected_query
     assert type(request).__name__ == "RequestInformation"
 
