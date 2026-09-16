@@ -57,22 +57,21 @@ import inspect
 
 from kiota_abstractions.request_adapter import RequestAdapter
 
+from .errors import MESSAGES, GraphError, classify_upstream, to_graph_error
+
 _HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 _CALLER_NAMES = {method: method.lower() for method in _HTTP_METHODS}
 
 
-class ExecutionError(RuntimeError):
+class ExecutionError(GraphError):
     """Typed, sanitized failure raised at the execution seam.
 
-    ``category`` is stable and safe to report; ``message`` never carries raw SDK, Kiota,
-    Graph or Azure text. The originating exception, when there is one, is available as
-    ``__cause__`` and is for local debugging only -- handlers must not return it.
+    The category comes from the canonical taxonomy in :mod:`microsoft365.errors` (this class
+    *is* a taxonomy error, so a category invented here is rejected). The message is a static
+    taxonomy template: raw SDK, Kiota, Graph or Azure text never appears in it. The
+    originating exception, when there is one, is available as ``__cause__`` and is for local
+    debugging only -- handlers must not return it.
     """
-
-    def __init__(self, category: str, message: str):
-        self.category = str(category)
-        self.message = str(message)
-        super().__init__(f"{self.category}: {self.message}")
 
 
 def _normalized_method(method) -> str:
@@ -94,15 +93,32 @@ def _call(callable_object, *, body, configuration):
     return callable_object(configuration)
 
 
+def _sanitized(category: str, exc: BaseException) -> ExecutionError:
+    """Build a seam error from the taxonomy: same category, static message, safe metadata."""
+    return ExecutionError(
+        category,
+        MESSAGES[category],
+        retryable=exc.retryable,
+        retry_after_seconds=exc.retry_after_seconds,
+        correlation_id=exc.correlation_id,
+        status_code=exc.status_code,
+    )
+
+
 def run_async(awaitable, *, category: str = "service_error"):
     """Run ``awaitable`` to completion on a private event loop.
 
     This is the only place the plugin crosses from a synchronous tool handler into the
     SDK's coroutines. The event loop is created and torn down per call, so no loop,
     client or credential is shared between calls.
+
+    A failure that carries a real upstream signal (an HTTP status, a structured Graph error code,
+    an Azure/Kiota/transport family) is classified by :mod:`microsoft365.errors`; a purely
+    local failure keeps the ``category`` this call site declares. Either way the reported
+    message is a static taxonomy template -- raw text stays in ``__cause__`` only.
     """
     if not inspect.isawaitable(awaitable):
-        raise ExecutionError("configuration_error", "run_async requires an awaitable")
+        raise ExecutionError("configuration_error", MESSAGES["configuration_error"])
 
     try:
         asyncio.get_running_loop()
@@ -121,7 +137,8 @@ def run_async(awaitable, *, category: str = "service_error"):
     except ExecutionError:
         raise
     except Exception as exc:
-        raise ExecutionError(category, "graph call failed") from exc
+        converted = to_graph_error(exc, category=classify_upstream(exc, default=category))
+        raise _sanitized(converted.category, converted) from exc
 
 
 def request_information_sender(builder, *, method, configuration=None, body=None):
@@ -185,8 +202,16 @@ def resolve_request_adapter(client_factory):
         )
     try:
         client = client_factory()
+    except ExecutionError:
+        raise
+    except GraphError as exc:
+        # A category the taxonomy already decided (e.g. unsupported_auth_mode) is preserved
+        # instead of being flattened into authentication_required.
+        raise _sanitized(exc.category, exc) from exc
     except Exception as exc:
-        raise ExecutionError("authentication_required", "graph client could not be created") from exc
+        raise ExecutionError(
+            "authentication_required", MESSAGES["authentication_required"]
+        ) from exc
     adapter = getattr(client, "request_adapter", None)
     if not isinstance(adapter, RequestAdapter):
         raise ExecutionError("configuration_error", "graph client does not expose a request adapter")
