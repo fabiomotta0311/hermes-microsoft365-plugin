@@ -886,7 +886,9 @@ def test_etag_accepts_both_strong_and_weak_forms_but_never_a_wildcard():
     from microsoft365.validation import check
 
     settings = _settings("application")
-    for etag in ('"33a64df551425fcc55e4d42a148795d9f25f89d4"', ETAG, "unquoted-etag-token"):
+    # Sample ETag values. The first is a well-known published example value, not a credential;
+    # the marker below keeps the secret scanner honest about that.
+    for etag in ('"33a64df551425fcc55e4d42a148795d9f25f89d4"', ETAG, "unquoted-etag-token"):  # pragma: allowlist secret
         assert (
             check(
                 settings,

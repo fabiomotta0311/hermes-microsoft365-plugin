@@ -30,9 +30,9 @@ Hermes currently has a generic approval modification-order defect described in t
 
 ## Files and pagination
 
-- The offline foundation verifies generated drive collection request information and binary normalization, not complete path-based `/content` upload/download behavior.
+- Path-based drive `/content` transfer is implemented with validated relative-path addressing, the 10 MiB simple-transfer bound enforced before allocation in both directions, and byte-exact round trips (`microsoft365/files.py`, WP4). Large-file upload sessions and ranged download are not implemented and are reported explicitly (`upload_session_not_implemented`, `download_range_not_implemented`). No executable operation consumes it yet.
 - Multi-page Graph traversal is implemented as an offline helper with authenticated next-link validation, cycle detection and a global page cap (`microsoft365/paging.py`, WP5). No executable operation consumes it yet, so multi-page behavior against Graph remains unverified.
-- The 10 MiB simple-transfer product contract is retained in metadata, but large-file upload sessions are not implemented.
+- The 10 MiB simple-transfer contract is enforced in code; the large-file upload-session request shape is contract-verified but deliberately not executed.
 
 ## Delivery
 
