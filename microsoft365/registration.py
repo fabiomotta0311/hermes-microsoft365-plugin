@@ -1,10 +1,44 @@
 """Conditional schemas and native Hermes registration."""
 from __future__ import annotations
 
+import inspect
 import json
+from typing import Any, Callable
 
 from .contract import ConfigurationError, OPERATIONS, Settings, WRITE_OPERATIONS, operation_status
+from .execution import ExecutionError, run_async
 from .preflight import build_preflight
+
+#: Operation handlers keyed ``"<service>.<operation>"``, populated by the handler work
+#: packages (WP6-WP9). Every entry is executed through :func:`invoke_handler`, which is
+#: the only place this plugin crosses the sync/async execution seam.
+HANDLER_TABLE: dict[str, Callable[[dict], Any]] = {}
+
+
+def invoke_handler(handler, args):
+    """Run one registered handler, awaiting async handlers through the execution seam."""
+    result = handler(args)
+    if inspect.isawaitable(result):
+        return run_async(result)
+    return result
+
+
+def unavailable_handler(args, *, service: str) -> str:
+    """Fallback for every operation that has no handler yet."""
+    del args
+    return json.dumps({"error": "operation_not_implemented", "service": service})
+
+
+def service_tool_handler(service: str, args):
+    """Dispatch one service tool call: registered handler, else unavailable."""
+    operation = args.get("action") if isinstance(args, dict) else None
+    handler = HANDLER_TABLE.get(f"{service}.{operation}") if isinstance(operation, str) else None
+    if handler is None:
+        return unavailable_handler(args, service=service)
+    try:
+        return invoke_handler(handler, args)
+    except ExecutionError as exc:
+        return json.dumps({"error": exc.category, "message": str(exc)})
 
 
 def active_actions(settings: Settings, service: str) -> tuple[str, ...]:
@@ -99,15 +133,15 @@ def register_plugin(ctx) -> None:
         if schema is None:
             continue
 
-        def unavailable_handler(args, _service=service, **kwargs):
-            del args, kwargs
-            return json.dumps({"error": "operation_not_implemented", "service": _service})
+        def service_handler(args, _service=service, **kwargs):
+            del kwargs
+            return service_tool_handler(_service, args)
 
         ctx.register_tool(
             name=f"microsoft365_{service}",
             toolset="microsoft365",
             schema=schema,
-            handler=unavailable_handler,
+            handler=service_handler,
             check_fn=lambda: True,
             is_async=False,
             emoji="📎",

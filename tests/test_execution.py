@@ -1,0 +1,282 @@
+"""WP0 — the single Microsoft Graph execution seam, proven offline.
+
+The transport double is ``StrictTransportAdapter`` from ``tests/test_sdk_contract.py``
+(imported, not re-implemented): every ``send_*`` raises ``AssertionError``, so any
+accidental network attempt fails the test that made it.
+"""
+from __future__ import annotations
+
+import asyncio
+import inspect
+import json
+from pathlib import Path
+from urllib.parse import urlsplit
+
+import pytest
+from kiota_abstractions.base_request_configuration import RequestConfiguration
+from kiota_abstractions.request_adapter import RequestAdapter
+
+from tests.test_sdk_contract import StrictTransportAdapter, graph_client
+
+
+def _query_configuration(builder, **values):
+    query_type = getattr(type(builder), f"{type(builder).__name__}GetQueryParameters")
+    return RequestConfiguration(query_parameters=query_type(**values))
+
+
+def test_execution_seam_never_touches_network(graph_client):
+    from microsoft365.execution import request_information_sender
+
+    builder = graph_client.users.by_user_id("user").messages
+    request = request_information_sender(
+        builder,
+        method="GET",
+        configuration=_query_configuration(builder, top=3, filter="contains(subject,'hello')"),
+    )
+
+    recorded = {
+        "method": request.http_method.value,
+        "path": urlsplit(request.url).path,
+        "query": request.query_parameters,
+    }
+
+    assert recorded["method"] == "GET"
+    assert recorded["path"] == "/users/user/messages"
+    assert recorded["query"] == {"%24filter": "contains(subject,'hello')", "%24top": 3}
+    # The injected double raises on every send: building must not reach it.
+    assert isinstance(graph_client.request_adapter, StrictTransportAdapter)
+
+
+def test_execution_seam_sends_only_through_the_injected_adapter(graph_client):
+    from microsoft365.execution import ExecutionError, execute_request
+
+    builder = graph_client.users.by_user_id("user").messages
+
+    with pytest.raises(ExecutionError) as caught:
+        execute_request(builder, method="GET", adapter=graph_client.request_adapter)
+
+    assert caught.value.category == "transport_error"
+    assert isinstance(caught.value.__cause__, AssertionError)
+
+
+def test_execution_seam_fails_closed_without_an_injected_adapter(graph_client):
+    from microsoft365.execution import ExecutionError, execute_request
+
+    builder = graph_client.users.by_user_id("user").messages
+
+    with pytest.raises(ExecutionError) as caught:
+        execute_request(builder, method="GET", adapter=None)
+
+    assert caught.value.category == "configuration_error"
+
+
+def test_execution_seam_rejects_a_builder_not_bound_to_the_injected_adapter(graph_client):
+    from microsoft365.execution import ExecutionError, execute_request
+
+    builder = graph_client.users.by_user_id("user").messages
+
+    with pytest.raises(ExecutionError) as caught:
+        execute_request(builder, method="GET", adapter=StrictTransportAdapter())
+
+    assert caught.value.category == "configuration_error"
+
+
+def test_execution_seam_exposes_content_url_headers_and_exact_bytes(graph_client):
+    from microsoft365.execution import request_information_sender
+
+    builder = graph_client.drives.by_drive_id("drive").items.by_drive_item_id("root:/a/b.txt:").content
+    payload = b"\x00binary\xff"
+
+    request = request_information_sender(builder, method="PUT", body=payload)
+
+    assert request.http_method.value == "PUT"
+    assert urlsplit(request.url).path == "/drives/drive/items/root%3A%2Fa%2Fb.txt%3A/content"
+    assert "application/octet-stream" in request.headers.get("Content-Type")
+    assert request.content == payload
+
+
+def test_execution_seam_rejects_an_unsupported_method(graph_client):
+    from microsoft365.execution import ExecutionError, request_information_sender
+
+    builder = graph_client.users.by_user_id("user").messages
+
+    with pytest.raises(ExecutionError) as caught:
+        request_information_sender(builder, method="TRACE")
+
+    assert caught.value.category == "configuration_error"
+
+
+def test_execution_seam_wraps_a_missing_body_in_a_typed_error(graph_client):
+    from microsoft365.execution import ExecutionError, request_information_sender
+
+    builder = graph_client.users.by_user_id("user").messages
+
+    with pytest.raises(ExecutionError) as caught:
+        request_information_sender(builder, method="POST")
+
+    assert caught.value.category == "configuration_error"
+    assert isinstance(caught.value.__cause__, TypeError)
+
+
+def test_execution_seam_handles_a_post_without_a_body(graph_client):
+    from microsoft365.execution import request_information_sender
+
+    builder = graph_client.users.by_user_id("user").messages.by_message_id("message").send
+    request = request_information_sender(builder, method="POST")
+
+    assert request.http_method.value == "POST"
+    assert urlsplit(request.url).path == "/users/user/messages/message/send"
+
+
+def test_run_async_returns_the_value_of_the_awaitable():
+    from microsoft365.execution import run_async
+
+    async def answer():
+        return 42
+
+    assert run_async(answer()) == 42
+
+
+def test_run_async_wraps_sdk_failures_in_a_typed_error_without_raw_text():
+    from microsoft365.execution import ExecutionError, run_async
+
+    async def boom():
+        raise ValueError("client_secret=SENTINEL-raw-sdk-text")
+
+    with pytest.raises(ExecutionError) as caught:
+        run_async(boom(), category="transport_error")
+
+    assert caught.value.category == "transport_error"
+    assert "SENTINEL-raw-sdk-text" not in str(caught.value)
+    assert isinstance(caught.value.__cause__, ValueError)
+
+
+def test_run_async_rejects_a_non_awaitable():
+    from microsoft365.execution import ExecutionError, run_async
+
+    with pytest.raises(ExecutionError) as caught:
+        run_async(object())
+
+    assert caught.value.category == "configuration_error"
+
+
+def test_run_async_fails_closed_inside_a_running_loop():
+    from microsoft365.execution import ExecutionError, run_async
+
+    async def nested():
+        run_async(asyncio.sleep(0))
+
+    with pytest.raises(ExecutionError) as caught:
+        asyncio.run(nested())
+
+    assert caught.value.category == "internal_error"
+
+
+def test_resolve_request_adapter_returns_the_adapter_of_the_injected_client(graph_client):
+    from microsoft365.execution import resolve_request_adapter
+
+    assert resolve_request_adapter(lambda: graph_client) is graph_client.request_adapter
+
+
+def test_resolve_request_adapter_wraps_credential_failure_in_a_typed_error():
+    from microsoft365.execution import ExecutionError, resolve_request_adapter
+
+    sentinel = "SENTINEL-raw-azure-text"
+
+    def failing_factory():
+        raise RuntimeError(f"MICROSOFT365_CLIENT_SECRET is not available in the active secret scope: {sentinel}")
+
+    with pytest.raises(ExecutionError) as caught:
+        resolve_request_adapter(failing_factory)
+
+    assert caught.value.category == "authentication_required"
+    assert sentinel not in str(caught.value)
+    assert "MICROSOFT365_CLIENT_SECRET" not in str(caught.value)
+    assert isinstance(caught.value.__cause__, RuntimeError)
+
+
+def test_resolve_request_adapter_fails_closed_without_a_client_factory():
+    from microsoft365.execution import ExecutionError, resolve_request_adapter
+
+    with pytest.raises(ExecutionError) as caught:
+        resolve_request_adapter(None)
+
+    assert caught.value.category == "configuration_error"
+
+
+def test_execution_module_keeps_no_credential_or_client_in_module_state():
+    from microsoft365 import execution
+
+    module_values = [value for name, value in vars(execution).items() if not name.startswith("_")]
+    assert not any(isinstance(value, RequestAdapter) for value in module_values)
+    assert not any(type(value).__name__ == "GraphServiceClient" for value in module_values)
+
+    source = Path(execution.__file__).read_text(encoding="utf-8")
+    for forbidden in ("get_secret", "secret_scope", "ClientSecretCredential", "azure.identity"):
+        assert forbidden not in source
+
+
+def test_generated_builder_methods_are_async_so_one_seam_is_required(graph_client):
+    from microsoft365.execution import run_async
+
+    builder = graph_client.users.by_user_id("user").messages
+
+    assert inspect.iscoroutinefunction(builder.get)
+    assert not inspect.iscoroutinefunction(run_async)
+
+
+def test_registration_invokes_async_handlers_through_the_seam():
+    from microsoft365 import registration
+
+    async def handler(args):
+        return {"action": args["action"], "executed_through_seam": True}
+
+    assert registration.invoke_handler(handler, {"action": "teams.list_teams"}) == {
+        "action": "teams.list_teams",
+        "executed_through_seam": True,
+    }
+
+
+def test_service_tool_handler_keeps_unavailable_default_for_unregistered_operations():
+    from microsoft365 import registration
+
+    assert json.loads(registration.service_tool_handler("outlook", {"action": "search"})) == {
+        "error": "operation_not_implemented",
+        "service": "outlook",
+    }
+    assert json.loads(registration.service_tool_handler("planner", None)) == {
+        "error": "operation_not_implemented",
+        "service": "planner",
+    }
+
+
+def test_service_tool_handler_returns_a_typed_error_and_never_raw_sdk_text(monkeypatch, graph_client):
+    from microsoft365 import execution, registration
+
+    # Supported handler shape: synchronous, using the seam for the graph call.
+    def handler(args):
+        del args
+        builder = graph_client.users.by_user_id("user").messages
+        return execution.execute_request(builder, method="GET", adapter=graph_client.request_adapter)
+
+    monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.search", handler)
+
+    payload = json.loads(registration.service_tool_handler("outlook", {"action": "search"}))
+
+    assert payload["error"] == "transport_error"
+    assert "network transport must not run" not in json.dumps(payload)
+
+
+def test_async_handler_must_not_nest_the_seam_and_fails_closed(monkeypatch, graph_client):
+    from microsoft365 import execution, registration
+
+    async def nested_handler(args):
+        del args
+        builder = graph_client.users.by_user_id("user").messages
+        return execution.execute_request(builder, method="GET", adapter=graph_client.request_adapter)
+
+    monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.read", nested_handler)
+
+    payload = json.loads(registration.service_tool_handler("outlook", {"action": "read"}))
+
+    assert payload["error"] == "internal_error"
