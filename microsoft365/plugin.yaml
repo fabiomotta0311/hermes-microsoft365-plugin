@@ -1,0 +1,39 @@
+name: microsoft365
+version: 0.1.0-alpha.1
+manifest_version: 2
+api_version: 1
+description: "Pre-release Microsoft 365 Graph tools for Hermes"
+author: Fabio Motta
+kind: standalone
+license: MIT
+homepage: https://github.com/fabiomotta0311/hermes-microsoft365-plugin
+requires_hermes: ">=0.21.3,<0.22"
+tags: [microsoft365, graph, outlook, onedrive, sharepoint, calendar, teams, todo, planner]
+python_dependencies:
+  - "msgraph-sdk==1.62.0"
+  - "azure-identity==1.25.3"
+  - "microsoft-kiota-abstractions==1.12.3"
+  - "microsoft-kiota-http==1.12.3"
+  - "microsoft-kiota-serialization-json==1.12.3"
+requires_env:
+  - name: MICROSOFT365_CLIENT_SECRET
+    description: "Microsoft Entra application client secret"
+    url: "https://entra.microsoft.com/"
+    secret: true
+provides_tools:
+  - microsoft365_preflight
+  - microsoft365_outlook
+  - microsoft365_sharepoint
+  - microsoft365_onedrive
+  - microsoft365_calendar
+  - microsoft365_teams
+  - microsoft365_todo
+  - microsoft365_planner
+provides_hooks:
+  - pre_tool_call
+config_schema:
+  tenant_id: {type: str, required: true, description: "Microsoft Entra tenant ID"}
+  client_id: {type: str, required: true, description: "Microsoft Entra application/client ID"}
+  user_id: {type: str, default: "", description: "Explicit Graph user ID for user-scoped application operations"}
+  authentication_mode: {type: str, default: application, description: "Authentication mode; this milestone executes application mode only"}
+  capabilities: {type: dict, required: true, description: "Strict operation-level boolean flags"}

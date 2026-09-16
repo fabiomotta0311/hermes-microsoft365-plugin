@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hermes-microsoft365-plugin"
+version = "0.1.0a1"
+description = "Pre-release native Hermes plugin for bounded Microsoft 365 Graph operations"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Fabio Motta"}]
+dependencies = [
+  "hermes-agent>=0.21.3,<0.22",
+  "msgraph-sdk==1.62.0",
+  "azure-identity==1.25.3",
+  "microsoft-kiota-abstractions==1.12.3",
+  "microsoft-kiota-http==1.12.3",
+  "microsoft-kiota-serialization-json==1.12.3",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.2.0",
+  "detect-secrets==1.5.0",
+]
+
+[project.entry-points."hermes_agent.plugins"]
+microsoft365 = "microsoft365:register"
+
+[tool.hatch.build.targets.wheel]
+packages = ["microsoft365"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
