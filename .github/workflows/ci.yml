@@ -13,6 +13,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the pinned Hermes host contract
+        uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 948e9706618220839a20c33c2fc5c19de074d835  # pragma: allowlist secret
+          path: _upstream/hermes-agent
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -20,7 +27,9 @@ jobs:
       - name: Install exact tested toolchain
         run: |
           python -m pip install --upgrade "pip==25.2"
-          python -m pip install "hermes-agent @ git+https://github.com/NousResearch/hermes-agent.git@948e9706618220839a20c33c2fc5c19de074d835"
+          # Hermes deliberately refuses wheel/sdist builds; development hosts
+          # must be installed editable from a reviewed checkout.
+          python -m pip install -e _upstream/hermes-agent
           python -m pip install -e ".[test]"
           python -m pip check
           python - <<'PY'

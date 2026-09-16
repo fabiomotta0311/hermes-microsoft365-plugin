@@ -8,6 +8,7 @@ htmlcov/
 dist/
 build/
 .venv/
+_upstream/
 venv/
 .env
 .env.*
