@@ -24,6 +24,41 @@ def _secret_key(key: Any) -> bool:
     return any(part in normalized for part in _SECRET_PARTS)
 
 
+def normalize_collection_page(
+    values: Any,
+    *,
+    odata_count: Any = None,
+    next_link: Any = None,
+    max_items: int = 100,
+    max_string: int = 4000,
+) -> dict:
+    """Normalize a graph collection page (or several pages) into one stable envelope.
+
+    Pagination needs the collection-level fields -- ``value``, ``@odata.count`` and
+    ``@odata.nextLink`` -- *and* every per-item guarantee :func:`normalize_result` already
+    provides (secret redaction, bounded strings, binary artifacts outside string
+    truncation). Items are therefore normalized one by one with that same function instead
+    of being copied into a second, weaker normalizer.
+
+    Only a link the caller has already validated belongs in ``next_link``: this function
+    reports what it is given and does not decide whether a continuation is safe. The
+    envelope is display/storage data -- the authoritative continuation is the paginator's
+    own report, because a very long link is truncated here by ``max_string``.
+    """
+    items = [] if values is None else list(values)
+    envelope: dict = {
+        "value": [
+            normalize_result(item, max_items=max_items, max_string=max_string)
+            for item in items[:max_items]
+        ]
+    }
+    if odata_count is not None:
+        envelope["@odata.count"] = normalize_result(odata_count, max_items=max_items, max_string=max_string)
+    if next_link:
+        envelope["@odata.nextLink"] = normalize_result(next_link, max_items=max_items, max_string=max_string)
+    return envelope
+
+
 def normalize_result(
     value: Any,
     *,
