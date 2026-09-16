@@ -602,12 +602,51 @@ def test_status_code_is_bounded_to_real_http_codes():
     assert taxonomy.to_graph_error(error).status_code is None
 
 
-def test_registration_unavailable_payload_uses_a_taxonomy_category():
+def test_registration_payload_categories_are_taxonomy_categories(monkeypatch):
+    import agent.secret_scope
+
+    from microsoft365.contract import Settings
     from microsoft365.registration import service_tool_handler
 
-    payload = json.loads(service_tool_handler("outlook", {"action": "search"}))
+    # An operation no handler exists for keeps the explicit unimplemented payload.
+    assert json.loads(service_tool_handler("planner", {"action": "list_plans"})) == {
+        "error": "operation_not_implemented",
+        "service": "planner",
+    }
 
+    # ``outlook.search`` is executable, so dispatch really runs. With no credential available
+    # the honest category is ``authentication_required`` -- the operation is implemented and the
+    # secret is what is missing -- and it is a taxonomy category like any other.
+    lookups: list = []
+    monkeypatch.setattr(
+        agent.secret_scope, "get_secret", lambda name, default=None: lookups.append(name) or None
+    )
+    settings = Settings.from_mapping(
+        {
+            "tenant_id": "tenant",
+            "client_id": "client",
+            "capabilities": {"outlook": {"search": True}},
+        }
+    )
+    payload = json.loads(
+        service_tool_handler("outlook", {"action": "search", "user_id": "user"}, settings=settings)
+    )
+
+    assert payload["error"] == "authentication_required"
     assert payload["error"] in taxonomy.CATEGORIES
+    assert lookups, "the executable read must dispatch as far as the client factory"
+
+    # The same read with the same credentials, but not selected by the administrator, is not
+    # executable: the gate refuses it, and still without touching a secret.
+    unselected = json.loads(
+        service_tool_handler(
+            "outlook",
+            {"action": "search", "user_id": "user"},
+            settings=Settings(tenant_id="tenant", client_id="client"),
+        )
+    )
+    assert unselected["error"] == "operation_not_implemented"
+    assert unselected["message"] == "Microsoft 365 operation is not executable: outlook.search"
 
 
 def test_taxonomy_module_keeps_no_credential_client_or_secret_access():

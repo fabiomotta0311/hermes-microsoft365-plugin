@@ -299,12 +299,14 @@ def _config(mode: str = "application", *, capabilities=None):
 
 
 def _registered(mode: str = "application", *, capabilities=None, monkeypatch=None):
-    """Register the plugin, optionally simulating the post-WP9 executable state.
+    """Register the plugin, optionally with every capability-enabled operation executable.
 
-    Without ``monkeypatch`` the registration is exactly today's: preflight plus the hook,
-    no service tool, because every operation is ``executable = False``. With it, only
-    ``active_actions`` is replaced by a plain function that reports every capability-enabled
-    operation as executable, which is what WP6-WP9 will make true; no registry flag changes.
+    Without ``monkeypatch`` the registration is exactly the milestone's: preflight, the hook,
+    and one service tool per service that has an executable operation (today Outlook and
+    Calendar, whose three verified reads are executable). With it, ``active_actions`` is
+    replaced by a plain function that reports every capability-enabled operation as executable,
+    including the writes, which is what a post-CORE-1 host will make true; no registry flag
+    changes.
     """
     from microsoft365 import register, registration
 
@@ -325,11 +327,20 @@ def _registered(mode: str = "application", *, capabilities=None, monkeypatch=Non
 
 
 def test_the_simulated_dispatch_seam_is_only_active_with_a_monkeypatch(monkeypatch):
-    """Guard on the test seam itself: without it, no service tool is registered."""
+    """Guard on the test seam itself: without it, only the executable services register."""
     plain = _registered()
     simulated = _registered(monkeypatch=monkeypatch)
 
-    assert set(plain.tools) == {"microsoft365_preflight"}
+    # Exactly the services whose operations the registry declares executable (the three
+    # verified reads of WP6) get a tool; the other five services keep only preflight.
+    assert set(plain.tools) == {
+        "microsoft365_preflight",
+        "microsoft365_outlook",
+        "microsoft365_calendar",
+    }
+    assert {name for name in SERVICES if f"microsoft365_{name}" in plain.tools} == {
+        key.split(".", 1)[0] for key in EXECUTABLE_READS
+    }
     assert "microsoft365_outlook" in simulated.tools
     assert set(simulated.tools) == {"microsoft365_preflight"} | {f"microsoft365_{name}" for name in SERVICES}
 
@@ -547,7 +558,11 @@ def test_operation_status_is_derived_from_the_mode_matrix():
             assert status.auth_status == support.status, (key, mode)
             assert status.reason == support.reason, (key, mode)
             assert status.implementation_status == definition.implementation_status, (key, mode)
-            assert status.executable is False, (key, mode)
+            # executability is the registry flag *and* an available mode: the three verified
+            # reads run in application mode, nothing runs in the unimplemented delegated mode
+            assert status.executable is (
+                mode == "application" and key in EXECUTABLE_READS
+            ), (key, mode)
 
     unknown = operation_status("application", "outlook", "delete")
     assert unknown.auth_status == "unknown_operation"
@@ -574,14 +589,33 @@ def test_the_two_teams_operations_are_unsupported_in_application_mode():
         assert operation_status("delegated", service, operation).auth_status == "not_implemented"
 
 
-def test_no_operation_is_executable_and_no_flag_was_flipped():
+def test_only_the_three_verified_reads_are_executable_and_every_handler_is_registered():
+    """The milestone pin, in its exact form: named executable set, exact dispatch mapping.
+
+    This replaces the earlier "no operation is executable and nothing is registered" pin. It is
+    strictly stronger: it fails if a write is flipped, if a read loses its flag, if a handler is
+    removed from the registry, or if a handler is added without a contract case behind it.
+    """
     from microsoft365.contract import OPERATION_REGISTRY
     from microsoft365.registration import HANDLER_TABLE
 
     assert len(OPERATION_REGISTRY) == 30
+    assert {
+        key for key, definition in OPERATION_REGISTRY.items() if definition.executable
+    } == set(EXECUTABLE_READS)
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES)
+
     for key, definition in OPERATION_REGISTRY.items():
-        assert definition.executable is False, key
-        assert key not in HANDLER_TABLE, key
+        assert definition.executable is (key in EXECUTABLE_READS), key
+        if definition.executable:
+            assert key in HANDLER_TABLE, key
+            assert definition.contract_cases, key
+        elif key in WITHHELD_WRITES:
+            # implemented and withheld, never removed (invariant 14)
+            assert key in HANDLER_TABLE, key
+            assert definition.write is True, key
+        else:
+            assert key not in HANDLER_TABLE, key
         assert definition.endpoint == "; ".join(definition.endpoints), key
         assert definition.write is (
             definition.operation
@@ -1039,12 +1073,150 @@ def test_dispatch_path_rejects_before_reaching_a_registered_handler(monkeypatch)
     assert invoked == ["search"]
 
 
-def test_hook_keeps_the_existing_block_for_a_valid_but_non_executable_call():
-    ctx = _registered(capabilities={"outlook": {"search": True}, "teams": {"send_messages": True}})
+# --------------------------------------------------------------------------------------
+# Invariant 15: executability is re-evaluated on the final arguments, in the dispatch path
+# --------------------------------------------------------------------------------------
 
-    assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_outlook", args={"action": "search", "user_id": USER}) == {
+#: The three reads this milestone exposes to the model.
+EXECUTABLE_READS = frozenset({"outlook.search", "outlook.read", "calendar.search"})
+
+#: The four writes WP6 implemented, contract-pinned and deliberately left non-executable
+#: while the generic host approval fix (CORE-1/CORE-2) is unreleased (R5).
+WITHHELD_WRITES = frozenset(
+    {"outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events"}
+)
+
+
+def test_a_read_mutated_into_a_write_is_refused_at_dispatch(monkeypatch):
+    """CORE-1's defect class, closed inside the plugin.
+
+    ``HANDLER_TABLE`` holds the write handlers -- WP6 implemented and pinned them -- so "a
+    handler exists" must never mean "this call may run". A hook approves ``outlook.search``;
+    a later modification rewrites ``action`` into a write. Every step a handler would take
+    (secret lookup, credential, client, request) is armed to raise, so this test fails if the
+    dispatch path lets the mutated payload through.
+    """
+    import agent.secret_scope
+    import azure.identity
+    import msgraph
+
+    from microsoft365 import register, registration
+    from microsoft365.validation import check
+
+    def boom(name):
+        """A runtime step that records being reached and then raises (the seam sanitizes it)."""
+
+        def fail(*args, **kwargs):
+            record.append(name)
+            raise AssertionError(f"{name} must not be reached for a non-executable operation")
+
+        return fail
+
+    record: list = []
+    monkeypatch.setattr(agent.secret_scope, "get_secret", boom("get_secret"))
+    monkeypatch.setattr(azure.identity, "ClientSecretCredential", boom("ClientSecretCredential"))
+    monkeypatch.setattr(msgraph, "GraphServiceClient", boom("GraphServiceClient"))
+
+    ctx = RecordingContext(
+        {
+            "tenant_id": "tenant",
+            "client_id": "client",
+            "authentication_mode": "application",
+            "capabilities": {service: True for service in SERVICES},
+        }
+    )
+    register(ctx)
+    hook = ctx.hooks["pre_tool_call"]
+
+    for key in sorted(WITHHELD_WRITES):
+        payload = dict(VALID_PAYLOADS[key])
+        service, _ = key.split(".", 1)
+        tool = ctx.tools[f"microsoft365_{service}"]["handler"]
+
+        # Validation accepts this payload: only the executability gate can refuse it.
+        assert check(_settings(), service=service, arguments=payload) is None, key
+
+        # Both gates say the same thing about the same final arguments.
+        directive = hook(tool_name=f"microsoft365_{service}", args=payload)
+        assert directive == {
+            "action": "block",
+            "message": f"Microsoft 365 operation is not executable: {key}",
+        }, key
+
+        refused = json.loads(tool(payload))
+        assert refused["error"] == "operation_not_implemented", key
+        assert refused["message"] == directive["message"], key
+        # the dispatch function the tool handler calls re-evaluates independently
+        assert json.loads(
+            registration.service_tool_handler(service, payload, settings=_settings())
+        ) == refused, key
+
+    # The handler is never invoked either: a recording probe is not reached.
+    reached: list = []
+
+    def write_probe(args):
+        reached.append(str(args.get("action")))
+        return json.dumps({"error": "write_handler_reached"})
+
+    monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.send", write_probe)
+    outlook_tool = ctx.tools["microsoft365_outlook"]["handler"]
+    assert (
+        json.loads(outlook_tool(dict(VALID_PAYLOADS["outlook.send"])))["error"]
+        == "operation_not_implemented"
+    )
+    assert reached == []
+
+    # Nothing a handler would do was reached for any of the four writes: no secret lookup, no
+    # credential, no client, and therefore no request.
+    assert record == []
+
+    # Positive control: the same payload shape, but a read, dispatches as far as the credential
+    # -- which raises, so the honest outcome is the taxonomy's ``authentication_required`` and
+    # the armed runtime is proven live rather than inert.
+    read = json.loads(outlook_tool(dict(VALID_PAYLOADS["outlook.search"])))
+    assert record == ["get_secret"]
+    assert read["error"] == "authentication_required"
+
+
+def test_the_withheld_writes_keep_their_handler_and_the_reads_are_the_only_executable_set():
+    """The gate, not a missing handler, is what withholds the writes (invariant 15's premise)."""
+    from microsoft365.contract import OPERATION_REGISTRY
+    from microsoft365.registration import HANDLER_TABLE, active_actions
+
+    configuration = _settings()
+    assert {
+        key for key, definition in OPERATION_REGISTRY.items() if definition.executable
+    } == set(EXECUTABLE_READS)
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES)
+
+    for key in sorted(WITHHELD_WRITES):
+        service, operation = key.split(".", 1)
+        assert key in HANDLER_TABLE, key
+        assert operation not in active_actions(configuration, service), key
+
+
+def test_hook_lets_an_executable_read_through_and_blocks_a_withheld_write():
+    """The hook's executability gate, on the milestone's real state.
+
+    ``outlook.search`` is executable, so a valid call needs no block and no approval. The
+    withheld write ``outlook.send`` is valid yet not executable, so the hook blocks it with the
+    same message the dispatch path returns -- never an approval directive.
+    """
+    ctx = _registered(
+        capabilities={"outlook": {"search": True, "send": True}, "teams": {"send_messages": True}}
+    )
+
+    assert (
+        ctx.hooks["pre_tool_call"](
+            tool_name="microsoft365_outlook", args={"action": "search", "user_id": USER}
+        )
+        is None
+    )
+    assert ctx.hooks["pre_tool_call"](
+        tool_name="microsoft365_outlook", args={"action": "send", "user_id": USER, "message_id": "AAMkAG"}
+    ) == {
         "action": "block",
-        "message": "Microsoft 365 operation is not executable: outlook.search",
+        "message": "Microsoft 365 operation is not executable: outlook.send",
     }
     assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_outlook", args=None) == {
         "action": "block",
@@ -1142,8 +1314,15 @@ def test_unknown_authentication_mode_is_refused_without_registering_anything(mon
     assert rejection.category == "unsupported_auth_mode"
     assert operation_status("hybrid", "outlook", "search").auth_status == "not_implemented"
 
-    ctx = _registered(capabilities={"outlook": True})  # a valid config, for the control
-    assert "microsoft365_outlook" not in ctx.tools
+    # The unknown mode registers nothing at all -- not even the service tools a valid
+    # configuration now registers, because the executable reads do not exist in that mode.
+    ctx = _registered("hybrid")
+    assert set(ctx.tools) == {"microsoft365_preflight"}
+    # Control: a valid configuration *does* register the service tool, so the difference above
+    # is the authentication mode and not an empty capability set.
+    valid = _registered(capabilities={"outlook": {"search": True}})
+    assert "microsoft365_outlook" in valid.tools
+    assert set(valid.tools) == {"microsoft365_preflight", "microsoft365_outlook"}
     assert record == []
 
 

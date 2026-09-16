@@ -12,6 +12,17 @@ EXPECTED_OPERATIONS = {
     "planner": ("list_plans", "list_buckets", "list_tasks", "read", "create_tasks", "update_tasks"),
 }
 
+#: The exact executable set of this milestone: the three verified reads of the Outlook/Calendar
+#: work package. Spelled out literally, so neither a flipped write nor a lost read flag passes.
+EXECUTABLE_READS = frozenset({"outlook.search", "outlook.read", "calendar.search"})
+
+#: The operations whose service now declares a verified endpoint table with a contract case
+#: per row (Outlook and Calendar, WP6). Every other operation reports "not recorded".
+MESSAGING_OPERATIONS = frozenset(
+    {"outlook.search", "outlook.read", "outlook.create_draft", "outlook.send",
+     "calendar.search", "calendar.create_events", "calendar.update_events"}
+)
+
 
 def test_operation_registry_preserves_complete_product_contract():
     from microsoft365.contract import OPERATIONS, OPERATION_REGISTRY
@@ -93,16 +104,21 @@ def test_every_operation_records_its_endpoint_write_class_and_statuses():
         assert definition.write is (operation in WRITE_OPERATIONS), key
         assert definition.implementation_status in IMPLEMENTATION_STATUS_LABELS, key
         assert definition.remote_verification == "not_tested", key
-        assert definition.executable is False, key
+        # The milestone's exact executable set: the three verified reads of WP6 and nothing
+        # else. A flipped write, or a read that lost its flag, fails here.
+        assert definition.executable is (key in EXECUTABLE_READS), key
         assert definition.app.mode == "application", key
         assert definition.delegated.mode == "delegated", key
         assert definition.endpoint == "; ".join(definition.endpoints), key
-        if key in verified:
+        if key in verified or key in MESSAGING_OPERATIONS:
+            # A declared endpoint table and the strict offline contract case of every row.
             assert definition.endpoints, key
+            assert definition.contract_cases, key
         else:
-            # No endpoint table is declared for this service yet (WP1/WP6-WP9 add them):
+            # No endpoint table is declared for this service yet (WP7-WP9 add them):
             # the endpoint is reported as unrecorded rather than invented.
             assert definition.endpoints == (), key
+            assert definition.contract_cases == (), key
 
 
 def test_application_support_status_is_recorded_per_operation():

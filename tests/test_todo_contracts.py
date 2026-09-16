@@ -37,6 +37,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PERMISSION_MATRIX = REPO_ROOT / "microsoft365" / "references" / "graph-permissions.md"
 KNOWN_LIMITATIONS = REPO_ROOT / "docs" / "known-limitations.md"
 
+#: The exact executable set of this milestone: the three verified Outlook/Calendar reads.
+EXECUTABLE_READS = frozenset({"outlook.search", "outlook.read", "calendar.search"})
+
+#: The four writes WP6 implemented and this milestone keeps non-executable (R5).
+WITHHELD_WRITES = frozenset(
+    {"outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events"}
+)
+
 
 class StrictTodoTransportAdapter(RequestAdapter):
     """Serializes real generated models, never sends."""
@@ -832,15 +840,24 @@ def test_no_todo_operation_is_executable_while_its_handler_does_not_exist():
     for key in todo_keys:
         definition = OPERATION_REGISTRY[key]
         assert definition.implementation_status == "contract_verified", key
-        assert definition.executable is False, key
+        assert definition.executable is (key in EXECUTABLE_READS), key
         assert key not in HANDLER_TABLE, key
 
         service, operation = key.split(".", 1)
         status = operation_status("application", service, operation)
-        assert status.executable is False, key
+        assert status.executable is (key in EXECUTABLE_READS), key
         assert status.implementation_status == "contract_verified", key
         expected_auth = "not_verified" if key in TODO_WRITE_KEYS else "supported"
         assert status.auth_status == expected_auth, key
+
+    # The milestone's exact sets: three Outlook/Calendar reads are the only executable
+    # operations, and the only handlers registered are those reads plus the four writes WP6
+    # implemented and withholds (R5). No To Do operation, read or write, has a handler.
+    assert {
+        key for key, definition in OPERATION_REGISTRY.items() if definition.executable
+    } == set(EXECUTABLE_READS)
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES)
+    assert set(HANDLER_TABLE).isdisjoint(todo_keys)
 
 
 def test_todo_writes_keep_explicit_not_verified_status_until_endpoint_evidence_exists():
@@ -866,6 +883,8 @@ def test_todo_writes_keep_explicit_not_verified_status_until_endpoint_evidence_e
         service, operation = key.split(".", 1)
         status = operation_status("application", service, operation)
         assert status.auth_status == "not_verified"
+        # a To Do write stays non-executable: the milestone exposes three reads and no write
+        assert key not in EXECUTABLE_READS
         assert status.executable is False
 
 
@@ -953,8 +972,13 @@ def test_write_support_is_derived_from_the_endpoint_claims_not_asserted(monkeypa
     # not executable: support and executability are separate, and only WP9 may flip the flag
     status = contract.operation_status("application", "todo", "create_tasks")
     assert status.auth_status == "supported"
+    assert "todo.create_tasks" not in EXECUTABLE_READS
     assert status.executable is False
     assert contract.OPERATION_REGISTRY["todo.create_tasks"].executable is False
+    # the milestone's exact executable set is unchanged by the promotion
+    assert {
+        key for key, definition in contract.OPERATION_REGISTRY.items() if definition.executable
+    } == set(EXECUTABLE_READS)
 
 
 def test_todo_permission_claims_are_endpoint_specific_and_not_promoted():

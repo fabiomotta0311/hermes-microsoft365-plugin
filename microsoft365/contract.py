@@ -125,13 +125,24 @@ def _resolve_endpoint_identifiers(*, error, key, arguments, endpoints) -> dict[s
     return resolved
 
 
-def _endpoint_backed_definition(*, service: str, key: str, endpoints) -> OperationDefinition:
+def _endpoint_backed_definition(
+    *,
+    service: str,
+    key: str,
+    endpoints,
+    implementation_status: str | None = None,
+    executable: bool = False,
+) -> "OperationDefinition":
     """Registry entry derived from a service's own endpoint table.
 
     ``permissions``, ``container``, the identifier sets, the required headers, the contract
     cases and the claim statuses are all read from the endpoints, so a claim cannot drift
-    from the endpoint it belongs to. ``contract_verified`` requires every endpoint to name
-    the ``sdk_contract`` dispatcher and case a strict offline test pins.
+    from the endpoint it belongs to. The implementation status defaults to ``contract_verified``
+    when every endpoint names the ``sdk_contract`` dispatcher and case a strict offline test
+    pins, and to ``contract_foundation`` otherwise; a service with a handler behind every
+    endpoint passes ``implementation_status="implemented"``. ``executable`` is never inferred --
+    it is the caller's explicit declaration, because only a work package that owns the handler
+    may expose an operation (R5, invariant 5).
     """
     operation = key.split(".", 1)[1]
     pinned = all(endpoint.contract_call and endpoint.contract_case for endpoint in endpoints)
@@ -158,7 +169,12 @@ def _endpoint_backed_definition(*, service: str, key: str, endpoints) -> Operati
                 endpoint.documentation_page for endpoint in endpoints if endpoint.documentation_page
             )
         ),
-        implementation_status="contract_verified" if pinned else "contract_foundation",
+        implementation_status=(
+            implementation_status
+            if implementation_status is not None
+            else ("contract_verified" if pinned else "contract_foundation")
+        ),
+        executable=executable,
     )
 
 
@@ -617,22 +633,208 @@ def todo_write_support(key: str) -> ApplicationWriteSupport:
 
 
 #: Permission claims for the services whose endpoint contract the registry does not declare
-#: yet. Planner and To Do rows are deliberately absent: each of their operations derives its
-#: claim from its own endpoint table, so a blanket per-service claim cannot drift from the
-#: endpoint it belongs to.
+#: yet. Planner, To Do, Outlook and Calendar rows are deliberately absent: each of their
+#: operations derives its claim from its own endpoint table, so a blanket per-service claim
+#: cannot drift from the endpoint it belongs to.
 _PERMISSION_MAP = {
-    "outlook.search": ("Mail.Read",), "outlook.read": ("Mail.Read",),
-    "outlook.create_draft": ("Mail.ReadWrite",), "outlook.send": ("Mail.Send",),
     "sharepoint.search": ("Sites.Read.All",), "sharepoint.read": ("Sites.Read.All",),
     "sharepoint.download_files": ("Files.Read.All",), "sharepoint.upload_files": ("Files.ReadWrite.All",),
     "onedrive.search": ("Files.Read.All",), "onedrive.read": ("Files.Read.All",),
     "onedrive.download_files": ("Files.Read.All",), "onedrive.upload_files": ("Files.ReadWrite.All",),
-    "calendar.search": ("Calendars.Read",), "calendar.create_events": ("Calendars.ReadWrite",),
-    "calendar.update_events": ("Calendars.ReadWrite",),
     "teams.list_teams": ("Team.ReadBasic.All",), "teams.list_channels": ("Channel.ReadBasic.All",),
     "teams.search_messages": (), "teams.send_messages": (),
 }
 _UNSUPPORTED_APPLICATION = frozenset({"teams.search_messages", "teams.send_messages"})
+
+
+# --------------------------------------------------------------------------------------
+# Outlook and Calendar endpoint contracts (WP6)
+# --------------------------------------------------------------------------------------
+# Outlook and Calendar address one user's mailbox and one user's calendar. Their endpoint
+# table is declared here -- instead of staying in the blanket per-service permission map --
+# so the role, the container, the identifier set and the strict offline contract case of
+# every operation are attributed to the endpoint they belong to, exactly as Planner and To Do
+# already do. No ``path_template`` below was assembled by hand: each one was rendered with the
+# generated builder of the ``sdk_contract`` case named next to it, and
+# ``tests/test_handlers_outlook_calendar.py`` rebuilds every row and compares the rendered
+# method and path with the declaration, so an invented endpoint fails a test.
+#
+# No documentation page is recorded for these rows: no endpoint reference was re-read offline
+# (R10), so the claim stays ``documented_not_verified`` and the page is reported as
+# "not recorded" rather than guessed.
+
+
+@dataclass(frozen=True)
+class MessagingEndpoint:
+    """One verified request target of an Outlook or Calendar operation.
+
+    ``outlook.send`` is the only operation here with two endpoints: a composed message goes to
+    ``/users/{user_id}/sendMail``, while sending a draft that already exists goes to
+    ``/users/{user_id}/messages/{message_id}/send``. Each row therefore carries its own
+    ``path_identifiers``: the identifier set of the *operation* is the intersection of its
+    rows, so the operation requires only ``user_id`` while ``message_id`` stays optional, and
+    the union keeps ``message_id`` visible instead of silently unlisted.
+    """
+
+    service: str
+    operation: str
+    method: str
+    path_template: str
+    container: str
+    path_identifiers: tuple[str, ...] = ()
+    application_permissions: tuple[str, ...] = ()
+    claim_status: str = "documented_not_verified"
+    contract_call: str = ""
+    contract_case: str = ""
+    required_headers: tuple[str, ...] = ()
+    documentation_page: str = ""
+
+    @property
+    def key(self) -> str:
+        return f"{self.service}.{self.operation}"
+
+    @property
+    def endpoint(self) -> str:
+        """The endpoint this row claims its application role from."""
+        return f"{self.method} {self.path_template}"
+
+    @property
+    def required_identifiers(self) -> tuple[str, ...]:
+        """Identifiers this endpoint cannot be called without."""
+        return self.path_identifiers
+
+
+#: The single container kind of both services: one user's mailbox or calendar, addressed by
+#: ``user_id``. Neither service has a tenant-wide route here.
+MESSAGING_CONTAINER = "user"
+
+OUTLOOK_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
+    MessagingEndpoint(
+        service="outlook",
+        operation="search",
+        method="GET",
+        path_template="/users/{user_id}/messages",
+        container=MESSAGING_CONTAINER,
+        path_identifiers=("user_id",),
+        application_permissions=("Mail.Read",),
+        contract_call="build_collection_request_information",
+        contract_case="outlook_messages",
+    ),
+    MessagingEndpoint(
+        service="outlook",
+        operation="read",
+        method="GET",
+        path_template="/users/{user_id}/messages/{message_id}",
+        container=MESSAGING_CONTAINER,
+        path_identifiers=("user_id", "message_id"),
+        application_permissions=("Mail.Read",),
+        contract_call="build_item_request_information",
+        contract_case="outlook_read",
+    ),
+    MessagingEndpoint(
+        service="outlook",
+        operation="create_draft",
+        method="POST",
+        path_template="/users/{user_id}/messages",
+        container=MESSAGING_CONTAINER,
+        path_identifiers=("user_id",),
+        application_permissions=("Mail.ReadWrite",),
+        contract_call="build_write_request_information",
+        contract_case="outlook_create_draft",
+    ),
+    MessagingEndpoint(
+        service="outlook",
+        operation="send",
+        method="POST",
+        path_template="/users/{user_id}/sendMail",
+        container=MESSAGING_CONTAINER,
+        path_identifiers=("user_id",),
+        application_permissions=("Mail.Send",),
+        contract_call="build_write_request_information",
+        contract_case="outlook_send",
+    ),
+    MessagingEndpoint(
+        service="outlook",
+        operation="send",
+        method="POST",
+        path_template="/users/{user_id}/messages/{message_id}/send",
+        container=MESSAGING_CONTAINER,
+        path_identifiers=("user_id", "message_id"),
+        application_permissions=("Mail.Send",),
+        contract_call="build_write_request_information",
+        contract_case="outlook_send_existing",
+    ),
+)
+
+CALENDAR_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
+    MessagingEndpoint(
+        service="calendar",
+        operation="search",
+        method="GET",
+        path_template="/users/{user_id}/calendar/events",
+        container=MESSAGING_CONTAINER,
+        path_identifiers=("user_id",),
+        application_permissions=("Calendars.Read",),
+        contract_call="build_collection_request_information",
+        contract_case="calendar_events",
+    ),
+    MessagingEndpoint(
+        service="calendar",
+        operation="create_events",
+        method="POST",
+        path_template="/users/{user_id}/calendar/events",
+        container=MESSAGING_CONTAINER,
+        path_identifiers=("user_id",),
+        application_permissions=("Calendars.ReadWrite",),
+        contract_call="build_write_request_information",
+        contract_case="calendar_create_events",
+    ),
+    MessagingEndpoint(
+        service="calendar",
+        operation="update_events",
+        method="PATCH",
+        path_template="/users/{user_id}/calendar/events/{event_id}",
+        container=MESSAGING_CONTAINER,
+        path_identifiers=("user_id", "event_id"),
+        application_permissions=("Calendars.ReadWrite",),
+        contract_call="build_write_request_information",
+        contract_case="calendar_update_events",
+        # A conditional update: the handler refuses a call without an ETag, so the endpoint
+        # itself declares the header it cannot run without.
+        required_headers=("If-Match",),
+    ),
+)
+
+#: The complete endpoint table of both services, in declaration order.
+MESSAGING_ENDPOINTS: tuple[MessagingEndpoint, ...] = OUTLOOK_ENDPOINTS + CALENDAR_ENDPOINTS
+
+MESSAGING_OPERATIONS: tuple[str, ...] = (
+    "outlook.search",
+    "outlook.read",
+    "outlook.create_draft",
+    "outlook.send",
+    "calendar.search",
+    "calendar.create_events",
+    "calendar.update_events",
+)
+
+#: The operations this milestone exposes to the model: the three verified reads whose handler,
+#: contract case and endpoint row all exist. It is deliberately a literal, not a derivation:
+#: exposing an operation is a decision, and every write stays non-executable until the generic
+#: host approval fix (CORE-1/CORE-2) is available in a supported Hermes release (R5, D1).
+EXECUTABLE_OPERATIONS: tuple[str, ...] = (
+    "outlook.search",
+    "outlook.read",
+    "calendar.search",
+)
+
+
+def messaging_endpoints(key: str) -> tuple[MessagingEndpoint, ...]:
+    """Every verified endpoint of an Outlook or Calendar operation, in declaration order."""
+    if key not in MESSAGING_OPERATIONS:
+        raise ValueError(f"{key} is not a declared outlook or calendar operation")
+    return tuple(endpoint for endpoint in MESSAGING_ENDPOINTS if endpoint.key == key)
+
 
 # --------------------------------------------------------------------------------------
 # Per-authentication-mode operation matrix (WP13)
@@ -811,6 +1013,8 @@ def _application_permissions(key: str) -> tuple[str, ...]:
         return _endpoint_permissions(planner_endpoints(key))
     if service == "todo":
         return _endpoint_permissions(todo_endpoints(key))
+    if key in MESSAGING_OPERATIONS:
+        return _endpoint_permissions(messaging_endpoints(key))
     return tuple(_PERMISSION_MAP[key])
 
 
@@ -891,7 +1095,9 @@ def _delegated_mode_support(key: str) -> ModeSupport:
 #: What each implementation status is allowed to mean. ``contract_verified`` requires the
 #: registry to declare, for every endpoint of the operation, the ``sdk_contract`` dispatcher
 #: and case that a strict offline test pins (``tests/test_planner_contracts.py`` does this for
-#: Planner). ``implemented`` additionally requires a registered handler.
+#: Planner). ``implemented`` additionally requires a registered handler -- and it says nothing
+#: about exposure: an operation is reachable from the model only while it is ``executable``,
+#: which is why the four Outlook/Calendar writes are ``implemented`` and withheld.
 IMPLEMENTATION_STATUS_LABELS = {
     "contract_foundation":
         "Listed with a permission claim. The registry does not declare this operation's "
@@ -899,10 +1105,12 @@ IMPLEMENTATION_STATUS_LABELS = {
         "that its request shape is correct.",
     "contract_verified":
         "Every endpoint the operation uses is pinned by a strict offline request-contract "
-        "test. No handler exists, so the operation is not executable.",
+        "test. No handler exists for it, so the operation is not executable.",
     "implemented":
-        "A handler and a strict offline request-contract test both exist and the operation "
-        "is executable.",
+        "A handler and a strict offline request-contract test both exist. The operation is "
+        "exposed to the model only while it is executable; a write stays implemented and "
+        "non-executable until the generic host approval fix (CORE-1/CORE-2) is available "
+        "in a supported Hermes release (R5).",
 }
 
 
@@ -1008,6 +1216,23 @@ def _todo_definition(key: str) -> OperationDefinition:
     return _endpoint_backed_definition(service="todo", key=key, endpoints=todo_endpoints(key))
 
 
+def _messaging_definition(key: str) -> OperationDefinition:
+    """Registry entry of an Outlook or Calendar operation (WP6).
+
+    ``implemented`` (a handler exists for every endpoint, and every one is contract-pinned) is
+    the honest label, and ``executable`` is taken from the single literal set
+    :data:`EXECUTABLE_OPERATIONS`: the three verified reads are exposed to the model, the four
+    writes are implemented and withheld (R5).
+    """
+    return _endpoint_backed_definition(
+        service=key.split(".", 1)[0],
+        key=key,
+        endpoints=messaging_endpoints(key),
+        implementation_status="implemented",
+        executable=key in EXECUTABLE_OPERATIONS,
+    )
+
+
 OPERATION_REGISTRY = {
     **{
         key: OperationDefinition(
@@ -1020,6 +1245,7 @@ OPERATION_REGISTRY = {
     },
     **{key: _planner_definition(key) for key in PLANNER_OPERATIONS},
     **{key: _todo_definition(key) for key in TODO_OPERATIONS},
+    **{key: _messaging_definition(key) for key in MESSAGING_OPERATIONS},
 }
 
 

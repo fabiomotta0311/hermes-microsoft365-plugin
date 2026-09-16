@@ -27,6 +27,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PERMISSION_MATRIX = REPO_ROOT / "microsoft365" / "references" / "graph-permissions.md"
 KNOWN_LIMITATIONS = REPO_ROOT / "docs" / "known-limitations.md"
 
+#: The exact executable set of this milestone: the three verified Outlook/Calendar reads.
+EXECUTABLE_READS = frozenset({"outlook.search", "outlook.read", "calendar.search"})
+
+#: The four writes WP6 implemented and this milestone keeps non-executable (R5).
+WITHHELD_WRITES = frozenset(
+    {"outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events"}
+)
+
 
 class StrictPlannerTransportAdapter(RequestAdapter):
     """Serializes real generated models, never sends."""
@@ -571,7 +579,7 @@ def test_no_planner_operation_is_executable_while_its_handler_does_not_exist():
     for key in planner_keys:
         definition = OPERATION_REGISTRY[key]
         assert definition.implementation_status == "contract_verified", key
-        assert definition.executable is False, key
+        assert definition.executable is (key in EXECUTABLE_READS), key
         assert key not in HANDLER_TABLE, key
 
         service, operation = key.split(".", 1)
@@ -579,6 +587,14 @@ def test_no_planner_operation_is_executable_while_its_handler_does_not_exist():
         assert status.auth_status == "supported"
         assert status.implementation_status == "contract_verified"
         assert status.executable is False
+
+    # The milestone's exact sets, spelled out: three verified Outlook/Calendar reads are
+    # executable, and a handler exists for exactly those reads plus the four writes WP6
+    # implemented and this milestone deliberately withholds (R5). Nothing else has a handler.
+    assert {
+        key for key, definition in OPERATION_REGISTRY.items() if definition.executable
+    } == set(EXECUTABLE_READS)
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES)
 
 
 def test_implementation_status_labels_are_explicit_and_backed_by_declared_evidence():
@@ -593,6 +609,9 @@ def test_implementation_status_labels_are_explicit_and_backed_by_declared_eviden
         if definition.implementation_status == "implemented" or definition.executable:
             assert definition.contract_cases, key
             assert key in HANDLER_TABLE, key
+        # a handler is never registered for an operation the registry does not describe
+        if key in HANDLER_TABLE:
+            assert definition.implementation_status == "implemented", key
 
 
 def test_planner_permission_claims_are_endpoint_specific_and_not_promoted():

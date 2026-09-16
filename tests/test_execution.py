@@ -237,17 +237,64 @@ def test_registration_invokes_async_handlers_through_the_seam():
     }
 
 
-def test_service_tool_handler_keeps_unavailable_default_for_unregistered_operations():
+def test_service_tool_handler_keeps_unavailable_default_for_unhandled_operations():
+    """No handler, no dispatch: the payload is unchanged for an operation without one."""
     from microsoft365 import registration
 
-    assert json.loads(registration.service_tool_handler("outlook", {"action": "search"})) == {
+    assert json.loads(registration.service_tool_handler("planner", {"action": "list_plans"})) == {
         "error": "operation_not_implemented",
-        "service": "outlook",
+        "service": "planner",
     }
     assert json.loads(registration.service_tool_handler("planner", None)) == {
         "error": "operation_not_implemented",
         "service": "planner",
     }
+    # no operation named at all: nothing to dispatch, for any service
+    assert json.loads(registration.service_tool_handler("outlook", None)) == {
+        "error": "operation_not_implemented",
+        "service": "outlook",
+    }
+
+
+def test_an_executable_read_dispatches_and_reports_the_real_failure(monkeypatch):
+    """``outlook.search`` is executable now, so dispatch reaches the client factory.
+
+    With no secret available the honest outcome is the taxonomy's ``authentication_required``,
+    not ``operation_not_implemented``: the operation is implemented and exposed, and what is
+    missing is the credential. The secret lookup is recorded, which proves the read really
+    dispatched instead of being answered by a stub.
+    """
+    import agent.secret_scope
+
+    from microsoft365 import registration
+    from microsoft365.contract import Settings
+    from microsoft365.errors import CATEGORIES
+    from microsoft365.preflight import SECRET_ENV_NAME
+
+    lookups: list = []
+    monkeypatch.setattr(
+        agent.secret_scope,
+        "get_secret",
+        lambda name, default=None: lookups.append(name) or None,
+    )
+
+    payload = json.loads(
+        registration.service_tool_handler(
+            "outlook",
+            {"action": "search", "user_id": "user"},
+            settings=Settings.from_mapping(
+                {
+                    "tenant_id": "tenant",
+                    "client_id": "client",
+                    "capabilities": {"outlook": {"search": True}},
+                }
+            ),
+        )
+    )
+
+    assert payload["error"] == "authentication_required"
+    assert payload["error"] in CATEGORIES
+    assert lookups == [SECRET_ENV_NAME]
 
 
 def test_service_tool_handler_returns_a_typed_error_and_never_raw_sdk_text(monkeypatch, graph_client):

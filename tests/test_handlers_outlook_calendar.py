@@ -1378,10 +1378,123 @@ def test_create_events_refuses_when_a_field_did_not_reach_the_request(monkeypatc
 
 
 # ======================================================================================
-# The model-facing surface: a write is unreachable while the host approval defect stands
+# The milestone surface: three verified reads executable, four writes implemented and withheld
 # ======================================================================================
 
-READ_OPERATIONS = ("outlook.search", "outlook.read", "calendar.search")
+#: The operations this milestone exposes to the model: the three verified reads. Spelled out
+#: literally, so a reverted flag -- or one flag too many -- fails here.
+EXECUTABLE_OPERATIONS = frozenset({OUTLOOK_SEARCH, OUTLOOK_READ, CALENDAR_SEARCH})
+
+#: The four writes: implemented, contract-pinned, exercised offline through the seam, and
+#: non-executable until the generic host approval fix (CORE-1/CORE-2) is available (R5).
+NON_EXECUTABLE_WRITES = frozenset(
+    {OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS}
+)
+
+#: Every operation a handler exists for today: WP6 owns all of them.
+IMPLEMENTED_OPERATIONS = EXECUTABLE_OPERATIONS | NON_EXECUTABLE_WRITES
+
+#: Concrete identifiers for the declared endpoint rows, and the extra arguments each contract
+#: case needs. Used to rebuild every declared endpoint for real (see
+#: ``test_the_declared_messaging_endpoints_are_the_ones_the_sdk_contract_builds``).
+ENDPOINT_IDENTIFIERS = {"user_id": USER, "message_id": MESSAGE, "event_id": EVENT}
+
+ENDPOINT_CASE_ARGUMENTS: dict[tuple[str, str], dict] = {
+    ("build_collection_request_information", "outlook_messages"): {"query": "invoice"},
+    ("build_collection_request_information", "calendar_events"): {"query": "planning"},
+    ("build_item_request_information", "outlook_read"): {},
+    ("build_write_request_information", "outlook_create_draft"): {
+        "subject": "Weekly report",
+        "content": "Body text",
+        "recipients": ["a@example.com"],
+    },
+    ("build_write_request_information", "outlook_send"): {
+        "subject": "Weekly report",
+        "content": "Body text",
+        "recipients": ["a@example.com"],
+        "save_to_sent_items": True,
+    },
+    ("build_write_request_information", "outlook_send_existing"): {},
+    ("build_write_request_information", "calendar_create_events"): {
+        "subject": "Planning",
+        "start": DateTimeTimeZone(date_time=START, time_zone=TIME_ZONE),
+        "end": DateTimeTimeZone(date_time=END, time_zone=TIME_ZONE),
+    },
+    ("build_write_request_information", "calendar_update_events"): {
+        "etag": ETAG,
+        "update_fields": {"subject": "Renamed"},
+    },
+}
+
+
+def test_the_registry_declares_exactly_the_three_verified_reads_executable():
+    """The milestone flip itself, with every write still withheld."""
+    from microsoft365.contract import IMPLEMENTATION_STATUS_LABELS, OPERATION_REGISTRY
+
+    assert {
+        key for key, definition in OPERATION_REGISTRY.items() if definition.executable
+    } == set(EXECUTABLE_OPERATIONS)
+
+    for key in sorted(IMPLEMENTED_OPERATIONS):
+        definition = OPERATION_REGISTRY[key]
+        # exactly the same evidence for both halves: an endpoint row and a contract case
+        assert definition.endpoints, key
+        assert definition.contract_cases, key
+        assert definition.implementation_status == "implemented", key
+        assert definition.implementation_status in IMPLEMENTATION_STATUS_LABELS, key
+        assert definition.write is (key in NON_EXECUTABLE_WRITES), key
+        assert definition.executable is (key in EXECUTABLE_OPERATIONS), key
+
+    assert {
+        key for key in OPERATION_REGISTRY if key.startswith(("outlook.", "calendar."))
+    } == set(IMPLEMENTED_OPERATIONS)
+
+
+def test_operation_status_exposes_the_reads_and_withholds_every_write():
+    """``operation_status`` is the gate the hook and the dispatch path both read."""
+    from microsoft365.contract import operation_status
+
+    for key in sorted(IMPLEMENTED_OPERATIONS):
+        service, operation = key.split(".", 1)
+        application = operation_status("application", service, operation)
+        assert application.auth_status == "supported", key
+        assert application.executable is (key in EXECUTABLE_OPERATIONS), key
+        # delegated authentication is not implemented (WP14), so nothing runs there
+        assert operation_status("delegated", service, operation).executable is False, key
+
+
+def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
+    """One source of dispatch truth: ``HANDLER_TABLE`` is the self-populating registry."""
+    from microsoft365.registration import HANDLER_TABLE
+
+    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS)
+    for key in sorted(IMPLEMENTED_OPERATIONS):
+        assert callable(HANDLER_TABLE[key]), key
+
+
+def test_the_declared_messaging_endpoints_are_the_ones_the_sdk_contract_builds():
+    """Never invent an endpoint: each declared row is rebuilt by its own contract case."""
+    from microsoft365 import sdk_contract
+    from microsoft365.contract import messaging_endpoints
+
+    for key in sorted(IMPLEMENTED_OPERATIONS):
+        endpoints = messaging_endpoints(key)
+        assert endpoints, key
+        for endpoint in endpoints:
+            arguments = dict(
+                ENDPOINT_CASE_ARGUMENTS[(endpoint.contract_call, endpoint.contract_case)]
+            )
+            for name in endpoint.required_identifiers:
+                arguments[name] = ENDPOINT_IDENTIFIERS[name]
+            request = getattr(sdk_contract, endpoint.contract_call)(
+                graph_client(HandlerGraphAdapter()), endpoint.contract_case, **arguments
+            )
+
+            assert request.http_method.value == endpoint.method, endpoint.endpoint
+            expected = endpoint.path_template
+            for name, value in ENDPOINT_IDENTIFIERS.items():
+                expected = expected.replace(f"{{{name}}}", value)
+            assert urlsplit(request.url).path == expected, endpoint.endpoint
 
 
 def test_write_operations_stay_out_of_the_model_facing_schema():
@@ -1398,26 +1511,45 @@ def test_write_operations_stay_out_of_the_model_facing_schema():
         assert operation not in enum, key
 
 
-@pytest.mark.skipif(
-    not all(
-        OPERATION_REGISTRY[key].executable for key in ("outlook.search", "outlook.read", "calendar.search")
-    ),
-    reason=(
-        "WP6's executable flip is blocked by pre-existing milestone assertions outside WP6's "
-        "scope: tests/test_validation.py::test_no_operation_is_executable_and_no_flag_was_flipped "
-        "and tests/test_contract.py (executable is False for all 30 operations) plus the handler "
-        "calling convention of tests/test_execution.py. This test goes green the moment the flip "
-        "and the registry wiring land, and fails if either lands without a handler behind it."
-    ),
-)
-def test_the_reads_become_model_facing_and_the_writes_stay_out():
-    from microsoft365.registration import HANDLER_TABLE, active_actions
+def test_the_reads_are_model_facing_and_the_withheld_writes_keep_their_handler():
+    """The dispatch table holds the writes; the registry flag is what withholds them."""
+    from microsoft365.registration import HANDLER_TABLE, active_actions, schema_for
 
     configuration = settings()
-    for key in READ_OPERATIONS:
+    for key in sorted(EXECUTABLE_OPERATIONS):
         service, operation = key.split(".", 1)
-        assert operation in active_actions(configuration, service), key
+        actions = active_actions(configuration, service)
+        assert operation in actions, key
         assert key in HANDLER_TABLE, key
-    for key in sorted(WP6_WRITES):
+        schema = schema_for(service, actions)
+        assert operation in schema["parameters"]["properties"]["action"]["enum"], key
+
+    for key in sorted(NON_EXECUTABLE_WRITES):
         service, operation = key.split(".", 1)
-        assert operation not in active_actions(configuration, service), key
+        actions = active_actions(configuration, service)
+        assert operation not in actions, key
+        # the handler exists -- so it is the executability flag, not a missing handler, that
+        # keeps the write off the model surface
+        assert key in HANDLER_TABLE, key
+        schema = schema_for(service, actions)
+        enum = [] if schema is None else schema["parameters"]["properties"]["action"]["enum"]
+        assert operation not in enum, key
+
+    # Not dead code: the withheld writes are exactly the ones the parametrized seam tests
+    # above drive to a real request through the strict double.
+    assert {key for key, *_ in WRITE_CALLS} == set(NON_EXECUTABLE_WRITES)
+
+
+def test_known_limitations_records_the_milestone_state():
+    """Invariant 6: the document moves in the same commit as the capacity it describes."""
+    text = (REPO_ROOT / "docs" / "known-limitations.md").read_text(encoding="utf-8")
+
+    for key in sorted(IMPLEMENTED_OPERATIONS):
+        assert key in text, key
+    assert "Exactly three operations are executable" in text
+    assert "`active_actions()` never returns them" in text
+    assert "final arguments" in text
+    # the pre-WP6 wording claimed nothing consumed the paginator
+    assert "The two executable reads consume it" in text
+    # and that a list-valued PATCH field was unimplemented everywhere
+    assert "so affected updates stay unimplemented" not in text
