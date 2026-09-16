@@ -8,6 +8,7 @@ from typing import Any, Callable
 from .contract import ConfigurationError, OPERATIONS, Settings, WRITE_OPERATIONS, operation_status
 from .execution import ExecutionError, run_async
 from .preflight import build_preflight
+from .validation import check as check_operation_arguments
 
 #: Operation handlers keyed ``"<service>.<operation>"``, populated by the handler work
 #: packages (WP6-WP9). Every entry is executed through :func:`invoke_handler`, which is
@@ -113,6 +114,14 @@ def register_plugin(ctx) -> None:
             return None
         if not isinstance(args, dict):
             return {"action": "block", "message": "Microsoft 365 arguments must be an object"}
+        # WP13: the operation-specific validator runs before anything else this hook can do --
+        # before the approval directive, and before any handler could be reached. It is the
+        # same function and the same payload the dispatch path re-checks (defence in depth),
+        # so an invalid, disabled or unsupported call can never reach a secret, a credential
+        # or a Graph client, and can never be approved.
+        rejection = check_operation_arguments(settings, service=service, arguments=args)
+        if rejection is not None:
+            return {"action": "block", "message": rejection.message}
         operation = args.get("action")
         if operation not in active_actions(settings, service):
             return {"action": "block", "message": f"Microsoft 365 operation is not executable: {service}.{operation}"}
@@ -135,6 +144,13 @@ def register_plugin(ctx) -> None:
 
         def service_handler(args, _service=service, **kwargs):
             del kwargs
+            # WP13 defence in depth: the dispatch path validates the very payload it is about
+            # to execute with the same validator the hook used, so a call that did not pass the
+            # hook (another dispatch path, a host that skips hooks, a payload changed after
+            # approval) is refused here instead of reaching a handler, a secret or a client.
+            rejection = check_operation_arguments(settings, service=_service, arguments=args)
+            if rejection is not None:
+                return json.dumps(rejection.to_payload())
             return service_tool_handler(_service, args)
 
         ctx.register_tool(

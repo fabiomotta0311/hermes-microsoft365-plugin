@@ -634,6 +634,260 @@ _PERMISSION_MAP = {
 }
 _UNSUPPORTED_APPLICATION = frozenset({"teams.search_messages", "teams.send_messages"})
 
+# --------------------------------------------------------------------------------------
+# Per-authentication-mode operation matrix (WP13)
+# --------------------------------------------------------------------------------------
+#
+# One operation, two authentication modes, two independent records. Application support and
+# delegated support are stored separately -- each with its own status, its own permissions
+# (application **roles** vs delegated **scopes**), the endpoint it belongs to, the write
+# classification, the implementation status and the remote verification status -- because
+# the two are different permission systems and one must never be derived from the other.
+# The delegated scope table below is a literal record, not a mapping of the application
+# role map: ``planner.read`` holds ``Tasks.Read.All`` as an app role and ``Tasks.Read`` as a
+# delegated scope, and ``teams.search_messages``/``teams.send_messages`` claim no
+# application role at all while still declaring the scopes delegated mode would need.
+
+#: The authentication modes this plugin records support for.
+AUTH_MODES = frozenset({"application", "delegated"})
+
+#: The modes this plugin actually implements. Delegated is fully described in the matrix
+#: (status, scopes, admin consent) but no delegated authentication flow exists yet (WP14), so
+#: every delegated record resolves to ``not_implemented``: authentication is not implemented
+#: for that mode, which is a different statement from an operation being unavailable in it.
+IMPLEMENTED_AUTH_MODES = frozenset({"application"})
+
+#: What a mode-level support status is allowed to mean.
+MODE_SUPPORT_STATUSES = frozenset(
+    {"supported", "not_verified", "unsupported_auth_mode", "not_implemented"}
+)
+
+#: What the endpoint permission claim of one mode is allowed to be. ``no_permission_claimed``
+#: is the only status an unsupported mode may carry: nothing is claimed, so nothing is used.
+PERMISSION_STATUSES = frozenset({"no_permission_claimed", "documented_not_verified", "verified"})
+
+#: Remote verification is ``not_tested`` until WP16 runs against a disposable tenant, and
+#: ``verified`` additionally requires recorded evidence.
+REMOTE_VERIFICATION_STATUSES = frozenset({"not_tested", "verified"})
+
+#: Evidence for a ``verified`` remote status. Empty in this repository on purpose: no tenant
+#: has been contacted (R10; WP16 is the only work package allowed to fill it).
+REMOTE_VERIFICATION_EVIDENCE: tuple[str, ...] = ()
+
+#: Why an application permission always requires a tenant administrator.
+APPLICATION_CONSENT_BASIS = (
+    "an application permission is an app role: only a tenant administrator can grant it, "
+    "so nothing an application-mode call needs can be consented to by a user"
+)
+
+#: Why a delegated scope is reported as requiring consent while delegated is not implemented.
+UNVERIFIED_DELEGATED_CONSENT_BASIS = (
+    "the delegated consent record was not re-read offline and delegated authentication is "
+    "not implemented (R10; WP14), so consent is reported as required until it is recorded"
+)
+
+#: Why an operation with no claimed permission has nothing to consent to.
+NO_PERMISSION_CONSENT_BASIS = (
+    "no permission is claimed for this operation in this mode, so there is nothing to consent to"
+)
+
+#: The delegated scopes of every operation, recorded independently of ``_PERMISSION_MAP``.
+#: These are the scopes a delegated implementation (WP14) would request; recording them here
+#: does not make delegated authentication available, and no row of the application map is
+#: used to build them.
+_DELEGATED_SCOPES: dict[str, tuple[str, ...]] = {
+    "outlook.search": ("Mail.Read",),
+    "outlook.read": ("Mail.Read",),
+    "outlook.create_draft": ("Mail.ReadWrite",),
+    "outlook.send": ("Mail.Send",),
+    "sharepoint.search": ("Sites.Read.All",),
+    "sharepoint.read": ("Sites.Read.All",),
+    "sharepoint.download_files": ("Files.Read.All",),
+    "sharepoint.upload_files": ("Files.ReadWrite.All",),
+    "onedrive.search": ("Files.Read.All",),
+    "onedrive.read": ("Files.Read.All",),
+    "onedrive.download_files": ("Files.Read.All",),
+    "onedrive.upload_files": ("Files.ReadWrite.All",),
+    "calendar.search": ("Calendars.Read",),
+    "calendar.create_events": ("Calendars.ReadWrite",),
+    "calendar.update_events": ("Calendars.ReadWrite",),
+    "teams.list_teams": ("Team.ReadBasic.All",),
+    "teams.list_channels": ("Channel.ReadBasic.All",),
+    "teams.search_messages": ("Chat.Read", "ChannelMessage.Read.All"),
+    "teams.send_messages": ("ChannelMessage.Send",),
+    "todo.list_task_lists": ("Tasks.Read",),
+    "todo.search": ("Tasks.Read",),
+    "todo.read": ("Tasks.Read",),
+    "todo.create_tasks": ("Tasks.ReadWrite",),
+    "todo.update_tasks": ("Tasks.ReadWrite",),
+    "planner.list_plans": ("Tasks.Read",),
+    "planner.list_buckets": ("Tasks.Read",),
+    "planner.list_tasks": ("Tasks.Read",),
+    "planner.read": ("Tasks.Read",),
+    "planner.create_tasks": ("Tasks.ReadWrite",),
+    "planner.update_tasks": ("Tasks.ReadWrite",),
+}
+
+
+@dataclass(frozen=True)
+class ModeSupport:
+    """What one authentication mode supports for one operation, with its own claim.
+
+    ``permissions`` are the application **roles** when ``mode`` is ``application`` and the
+    delegated **scopes** when it is ``delegated``; the two are never derived from each other.
+    Every field is validated here and fails closed, so a record cannot be promoted by editing
+    one string:
+
+    * a ``verified`` permission claim needs recorded evidence (WP16 is the only work that can
+      record it);
+    * a supported/not-verified mode must claim the permission it needs, and an unsupported
+      mode may claim none at all;
+    * admin consent must be stated with its basis, and a mode that claims no permission has
+      nothing to consent to -- so the honest answer for an unverified delegated record is
+      ``admin_consent = True`` with an explicit basis rather than a silent "not required".
+    """
+
+    mode: str
+    status: str
+    permissions: tuple[str, ...] = ()
+    permission_status: str = "no_permission_claimed"
+    permission_evidence: tuple[str, ...] = ()
+    admin_consent: bool = False
+    admin_consent_basis: str = ""
+    reason: str = ""
+
+    def __post_init__(self) -> None:
+        if self.mode not in AUTH_MODES:
+            raise ValueError(f"unknown authentication mode: {self.mode!r}")
+        if self.status not in MODE_SUPPORT_STATUSES:
+            raise ValueError(f"unknown authentication mode support status: {self.status!r}")
+        if self.permission_status not in PERMISSION_STATUSES:
+            raise ValueError(f"unknown permission status: {self.permission_status!r}")
+        if self.permission_status == "verified" and not self.permission_evidence:
+            raise ValueError(
+                f"{self.mode} support cannot make a verified permission claim without "
+                "recorded evidence"
+            )
+        if self.permissions and self.permission_status == "no_permission_claimed":
+            raise ValueError(
+                f"{self.mode} support declares permissions with no recorded permission claim"
+            )
+        if self.status == "unsupported_auth_mode" and self.permission_status != "no_permission_claimed":
+            raise ValueError(
+                f"{self.mode} support cannot claim a permission on an unsupported mode"
+            )
+        if not self.permissions and self.permission_status != "no_permission_claimed":
+            raise ValueError(
+                f"{self.mode} support claims a permission it does not declare"
+            )
+        if self.status in {"supported", "not_verified"} and not self.permissions:
+            raise ValueError(
+                f"{self.mode} support must claim the permission it needs"
+            )
+        if self.admin_consent and not self.permissions:
+            raise ValueError(
+                f"{self.mode} support cannot require admin consent without claiming a permission"
+            )
+        if self.admin_consent and not self.admin_consent_basis.strip():
+            raise ValueError(
+                f"{self.mode} support that requires admin consent must record the basis"
+            )
+        if not self.admin_consent and not self.admin_consent_basis.strip():
+            raise ValueError(
+                f"{self.mode} support that does not require admin consent must state why "
+                "consent is not required"
+            )
+
+    @property
+    def permission_kind(self) -> str:
+        """What the entries of :attr:`permissions` are in this mode."""
+        return "application_role" if self.mode == "application" else "delegated_scope"
+
+
+def _application_permissions(key: str) -> tuple[str, ...]:
+    """The application roles of an operation, from the endpoint table it owns."""
+    service = key.split(".", 1)[0]
+    if service == "planner":
+        return _endpoint_permissions(planner_endpoints(key))
+    if service == "todo":
+        return _endpoint_permissions(todo_endpoints(key))
+    return tuple(_PERMISSION_MAP[key])
+
+
+def _application_mode_support(key: str) -> ModeSupport:
+    """Application support of one operation, derived from the honest sources it already has.
+
+    Derived on every call -- not baked in at import -- so a To Do write keeps following
+    :func:`todo_write_support` (its status is ``not_verified`` until every endpoint of the
+    write carries a verified application claim with recorded evidence) and cannot be promoted
+    by editing this function's inputs.
+    """
+    roles = _application_permissions(key)
+    if key in _UNSUPPORTED_APPLICATION:
+        return ModeSupport(
+            mode="application",
+            status="unsupported_auth_mode",
+            admin_consent_basis=NO_PERMISSION_CONSENT_BASIS,
+            reason=(
+                f"{key} has no application permission: this endpoint only exists for "
+                "delegated authentication"
+            ),
+        )
+    if key in TODO_WRITE_OPERATIONS:
+        support = todo_write_support(key)
+        if not support.supported:
+            return ModeSupport(
+                mode="application",
+                status="not_verified",
+                permissions=roles,
+                permission_status="documented_not_verified",
+                admin_consent=True,
+                admin_consent_basis=APPLICATION_CONSENT_BASIS,
+                reason=support.reason,
+            )
+    return ModeSupport(
+        mode="application",
+        status="supported",
+        permissions=roles,
+        permission_status="documented_not_verified",
+        admin_consent=True,
+        admin_consent_basis=APPLICATION_CONSENT_BASIS,
+        reason=(
+            "the operation is available to application authentication; the role is the one "
+            "recorded for its endpoint, not verified against a tenant (R10; WP16)"
+        ),
+    )
+
+
+def _delegated_mode_support(key: str) -> ModeSupport:
+    """Delegated support of one operation: scopes recorded, mode not implemented yet.
+
+    The status is ``not_implemented`` while ``delegated`` is absent from
+    :data:`IMPLEMENTED_AUTH_MODES`, so recording scopes cannot advertise a mode the plugin
+    cannot perform. Only WP14 may add the mode, and it does so in one place.
+    """
+    scopes = _DELEGATED_SCOPES[key]
+    implemented = "delegated" in IMPLEMENTED_AUTH_MODES
+    unavailable = key in _UNSUPPORTED_APPLICATION
+    return ModeSupport(
+        mode="delegated",
+        status="supported" if implemented else "not_implemented",
+        permissions=scopes,
+        permission_status="documented_not_verified",
+        admin_consent=True,
+        admin_consent_basis=UNVERIFIED_DELEGATED_CONSENT_BASIS,
+        reason=(
+            "delegated authentication is not implemented (WP14); this operation is only "
+            "available in delegated mode, the scopes below are the ones it will need"
+            if unavailable
+            else (
+                "delegated authentication is not implemented (WP14); the scopes below are the "
+                "ones this operation will need"
+            )
+        ),
+    )
+
+
 #: What each implementation status is allowed to mean. ``contract_verified`` requires the
 #: registry to declare, for every endpoint of the operation, the ``sdk_contract`` dispatcher
 #: and case that a strict offline test pins (``tests/test_planner_contracts.py`` does this for
@@ -654,10 +908,21 @@ IMPLEMENTATION_STATUS_LABELS = {
 
 @dataclass(frozen=True)
 class OperationDefinition:
+    """One operation of the catalogue, with its per-mode support matrix (WP13).
+
+    ``permissions`` are the application roles, and ``app``/``delegated`` carry the support of
+    each authentication mode (status, roles/scopes, permission claim, admin consent). Both
+    mode records are derived by :func:`_application_mode_support` / :func:`_delegated_mode_support`
+    and validated in :meth:`__post_init__`, so the registry cannot declare a mode status that
+    its own permissions do not back.
+    """
+
     service: str
     operation: str
     permissions: tuple[str, ...]
     write: bool
+    app: ModeSupport | None = None
+    delegated: ModeSupport | None = None
     endpoints: tuple[str, ...] = ()
     container: str = ""
     required_identifiers: tuple[str, ...] = ()
@@ -667,7 +932,70 @@ class OperationDefinition:
     permission_claim_statuses: tuple[str, ...] = ()
     documentation_pages: tuple[str, ...] = ()
     implementation_status: str = "contract_foundation"
+    remote_verification: str = "not_tested"
+    remote_verification_evidence: tuple[str, ...] = ()
+    admin_consent: bool | None = None
     executable: bool = False
+
+    def __post_init__(self) -> None:
+        key = f"{self.service}.{self.operation}"
+        app = self.app if self.app is not None else _application_mode_support(key)
+        delegated = self.delegated if self.delegated is not None else _delegated_mode_support(key)
+        object.__setattr__(self, "app", app)
+        object.__setattr__(self, "delegated", delegated)
+
+        if app.mode != "application":
+            raise ValueError(f"{key} must record its application support as mode 'application'")
+        if delegated.mode != "delegated":
+            raise ValueError(f"{key} must record its delegated support as mode 'delegated'")
+        if app.permissions != self.permissions:
+            raise ValueError(
+                f"{key} records application roles {app.permissions!r} but declares "
+                f"permissions {self.permissions!r}"
+            )
+        if self.remote_verification not in REMOTE_VERIFICATION_STATUSES:
+            raise ValueError(f"unknown remote verification status: {self.remote_verification!r}")
+        if self.remote_verification == "verified" and not self.remote_verification_evidence:
+            raise ValueError(
+                f"{key} cannot claim remote verification without recorded evidence (WP16)"
+            )
+        claimed = [mode for mode in (app, delegated) if mode.permissions]
+        expected_consent = any(mode.admin_consent for mode in claimed)
+        if self.admin_consent is None:
+            # Derived, never asserted: an operation needs an administrator when any mode it
+            # can actually use claims a permission.
+            object.__setattr__(self, "admin_consent", expected_consent)
+        elif self.admin_consent is not expected_consent:
+            raise ValueError(
+                f"{key} records admin_consent={self.admin_consent!r} but its mode support "
+                f"says {expected_consent!r}"
+            )
+
+    @property
+    def key(self) -> str:
+        return f"{self.service}.{self.operation}"
+
+    @property
+    def endpoint(self) -> str:
+        """The endpoints this operation uses, or an empty string while none is recorded.
+
+        Reported as unrecorded rather than invented: the services whose endpoint table is not
+        declared yet (WP1/WP6-WP9) have no verified endpoint to name here.
+        """
+        return "; ".join(self.endpoints)
+
+    def support_for(self, auth_mode: Any) -> ModeSupport | None:
+        """The mode support record of ``auth_mode``, or ``None`` for an unknown mode.
+
+        Derived from the same two builders the registry fields are built from, so a status
+        that has to follow the endpoint tables (a To Do write) keeps following them instead of
+        freezing at import time.
+        """
+        if auth_mode == "application":
+            return _application_mode_support(self.key)
+        if auth_mode == "delegated":
+            return _delegated_mode_support(self.key)
+        return None
 
 
 def _planner_definition(key: str) -> OperationDefinition:
@@ -708,27 +1036,34 @@ class ConfigurationError(ValueError):
 
 
 def operation_status(auth_mode: str, service: str, operation: str) -> OperationStatus:
+    """The honest status of one operation in one authentication mode, read from the matrix.
+
+    The verdict is the operation's own mode support record (WP13): ``unsupported_auth_mode``
+    when the mode cannot reach the endpoint at all, ``not_implemented`` when the authentication
+    mode itself is not implemented (delegated, WP14), ``not_verified`` when the mode's
+    permission for the endpoint is unverified, ``supported`` when the mode is available. A
+    supported mode still never implies execution: ``executable`` stays whatever the registry
+    declares, so support and executability cannot be conflated.
+    """
     key = f"{service}.{operation}"
     definition = OPERATION_REGISTRY.get(key)
     if definition is None:
         return OperationStatus("unknown_operation", "unknown", False, f"Unknown operation: {key}")
-    if auth_mode != "application":
-        return OperationStatus("not_implemented", definition.implementation_status, False, "Delegated authentication is not implemented")
-    if key in _UNSUPPORTED_APPLICATION:
-        return OperationStatus("unsupported_auth_mode", definition.implementation_status, False, "Operation requires delegated authentication")
-    if key in TODO_WRITE_OPERATIONS:
-        # Application-mode support of a To Do write is derived from the endpoint table, not
-        # asserted: it is ``not_verified`` until every endpoint of the write carries a
-        # verified application claim with recorded evidence (WP16). ``executable`` stays
-        # whatever the registry says, so support never promotes execution by itself.
-        support = todo_write_support(key)
-        if not support.supported:
-            return OperationStatus("not_verified", definition.implementation_status, False, support.reason)
+    support = definition.support_for(auth_mode)
+    if support is None:
+        return OperationStatus(
+            "not_implemented",
+            definition.implementation_status,
+            False,
+            "Authentication mode is not implemented",
+        )
+    if support.status in {"unsupported_auth_mode", "not_implemented", "not_verified"}:
+        return OperationStatus(support.status, definition.implementation_status, False, support.reason)
     return OperationStatus(
-        "supported",
+        support.status,
         definition.implementation_status,
         definition.executable,
-        "Authentication mode is supported; executable contract is reported separately",
+        support.reason,
     )
 
 
