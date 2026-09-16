@@ -158,7 +158,9 @@ def run_pagination(pages: dict, *, limit: int, **kwargs):
         ("https://graph.microsoft.com.xn--tld/v1.0/users/user/messages?%24skiptoken=x", "host"),
         ("https://graph.microsoft.com:8443/v1.0/users/user/messages?%24skiptoken=x", "host"),
         ("https://graph.microsoft.com@evil.tld/v1.0/users/user/messages?%24skiptoken=x", "host"),
-        ("https://user:pass@graph.microsoft.com/v1.0/users/user/messages?%24skiptoken=x", "host"),
+        # Hostile link carrying user info. The credential is a fixture and the rejection
+        # is the behaviour under test, so the marker below is deliberate.
+        ("https://user:pass@graph.microsoft.com/v1.0/users/user/messages?%24skiptoken=x", "host"),  # pragma: allowlist secret
         ("https://graph.microsoft.com/beta/users/user/messages?%24skiptoken=x", "version_path"),
         ("https://graph.microsoft.com/users/user/messages?%24skiptoken=x", "version_path"),
         ("https://graph.microsoft.com/v1.0?%24skiptoken=x", "version_path"),
@@ -623,12 +625,14 @@ def test_pagination_rejects_a_response_that_is_not_a_collection():
 
 
 def test_pagination_normalization_preserves_redaction_and_bounds():
-    secret = "sentinel-client-secret-value"
+    # A payload keyed like a credential must be redacted. The value is an obvious probe,
+    # not a credential, so the fixture cannot be mistaken for a leaked secret.
+    sentinel = "SENTINEL-REDACTION-PROBE"
     long_subject = "x" * 6000
     pages = {
         (FIRST_PATH, tuple(sorted(FIRST_QUERY.items()))): MessageCollectionResponse(
             value=[
-                Message(id="m1", additional_data={"client_secret": secret}),
+                Message(id="m1", additional_data={"client_secret": sentinel}),
                 Message(id="m2", subject=long_subject),
             ]
         )
@@ -637,7 +641,7 @@ def test_pagination_normalization_preserves_redaction_and_bounds():
     _, result = run_pagination(pages, limit=10)
 
     payload = json.dumps(result.payload)
-    assert secret not in payload
+    assert sentinel not in payload
     assert result.payload["value"][0]["additional_data"]["client_secret"] == "[REDACTED]"
     assert result.payload["value"][1]["subject"].endswith("...[TRUNCATED]")
     # the raw generated models handed to the caller are untouched by normalization

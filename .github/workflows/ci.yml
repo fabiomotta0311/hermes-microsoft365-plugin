@@ -58,7 +58,24 @@ jobs:
           python -m pip wheel . --no-deps --wheel-dir dist
       - name: Secret scan
         run: |
-          detect-secrets scan > "$RUNNER_TEMP/secrets.json"
-          python -c 'import json, os; p=os.path.join(os.environ["RUNNER_TEMP"], "secrets.json"); data=json.load(open(p)); assert not data["results"], data["results"]'
+          # Scope note: detect-secrets scans git-tracked files, so vendored or ignored
+          # trees are normally out of scope already. The exclusions below keep that true
+          # in a developer checkout that also carries the pinned Hermes source, a venv
+          # or build output, where the vendored tree does contain redaction fixtures and
+          # keyword literals that are not this plugin's code.
+          detect-secrets scan \
+            --exclude-files '(_upstream|\.venv|venv|dist|build|node_modules|\.git)/' \
+            > "$RUNNER_TEMP/secrets.json"
+          python - <<'PY'
+          import json, os, sys
+          path = os.path.join(os.environ["RUNNER_TEMP"], "secrets.json")
+          findings = json.load(open(path))["results"]
+          if findings:
+              for name in sorted(findings):
+                  kinds = sorted({item["type"] for item in findings[name]})
+                  print(f"::error file={name}::{', '.join(kinds)}")
+              sys.exit(1)
+          print("secret scan: 0 findings")
+          PY
       - name: Diff hygiene
         run: git diff --check
