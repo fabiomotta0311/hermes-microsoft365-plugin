@@ -6,7 +6,7 @@ This document states the boundary of the first standalone milestone. It is not r
 
 - Only application/client-credentials client construction is implemented. Delegated OAuth, secure delegated token caching, and account-selection UX remain open.
 - Authentication, tenant consent, endpoint permissions, throttling, pagination, and write cleanup have not been tested against an authorized test tenant.
-- Operations lacking a strict executable contract remain in the administrative registry and preflight status; they are not deleted and are not registered in active action enums. Exactly nine operations are executable today -- `outlook.search`, `outlook.read`, `calendar.search`, `sharepoint.search`, `sharepoint.read`, `sharepoint.download_files`, `onedrive.search`, `onedrive.read` and `onedrive.download_files` -- and every write stays non-executable until the host approval fix under "Host dependency" lands.
+- Operations lacking a strict executable contract remain in the administrative registry and preflight status; they are not deleted and are not registered in active action enums. Exactly eleven operations are executable today -- `outlook.search`, `outlook.read`, `calendar.search`, `sharepoint.search`, `sharepoint.read`, `sharepoint.download_files`, `onedrive.search`, `onedrive.read`, `onedrive.download_files`, `teams.list_teams` and `teams.list_channels` -- and every write stays non-executable until the host approval fix under "Host dependency" lands.
 - Microsoft Search chat-message support and large-file transfer sessions require further endpoint-specific work.
 
 ## Planner
@@ -36,6 +36,13 @@ This document states the boundary of the first standalone milestone. It is not r
 - `read` addresses one drive item by an opaque `item_id` or a validated relative `item_path` through `microsoft365.files.drive_item_address`; the generated builder renders the path and percent-encodes reserved and Unicode characters, never this plugin.
 - Six of the nine executable reads belong to these two services: `sharepoint.search`, `sharepoint.read`, `sharepoint.download_files`, `onedrive.search`, `onedrive.read` and `onedrive.download_files`.
 - The two uploads -- `sharepoint.upload_files` and `onedrive.upload_files` -- are implemented, contract-pinned and exercised offline through the execution seam (exact bytes, `Content-Type`, the 10 MiB bound before allocation), and deliberately **non-executable**: `active_actions()` never returns them, they appear in no action enum, and both the hook and the dispatch path refuse them. An upload whose `overwrite` is `False` is refused even offline, because a simple `PUT /content` always replaces its target and a conflict-safe upload needs an upload session, which is not implemented. The flip is gated on the host approval fix below (R5, D1).
+
+## Teams Graph
+
+- Teams Graph handlers are registered for `list_teams`, `list_channels`, `search_messages` and `send_messages`. The first two are implemented and executable in application mode through `users/{user_id}/joinedTeams` and `teams/{team_id}/channels`.
+- `joinedTeams` does not accept OData query parameters, and the channels endpoint does not accept `$top`; the handlers process returned collections within the shared item budget. Channels may use typed `$select`.
+- `search_messages` uses the generated `search/query` POST body (`QueryPostRequestBody` containing `SearchRequest`/`SearchQuery` for `chatMessage`), and `send_messages` uses a generated `ChatMessage` on the channel `messages` collection. Both remain delegated-only: application mode has no permission claim and dispatch refuses them before client or credential work; delegated scopes are recorded as `Chat.Read` + `ChannelMessage.Read.All` and `ChannelMessage.Send`, respectively.
+- Delegated authentication is not implemented until WP14, so delegated Teams operations are described in the matrix but are not executable. Bot Framework files (`plugins/platforms/teams` and `teams_pipeline`) are intentionally untouched.
 
 ## Microsoft To Do
 

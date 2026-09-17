@@ -230,6 +230,7 @@ def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
     implemented = {
         "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send",
         "calendar.search", "calendar.create_events", "calendar.update_events",
+        "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages",
     } | set(WP7_HANDLERS)
     assert set(HANDLER_TABLE) == implemented
     for key in sorted(WP7_HANDLERS):
@@ -609,6 +610,7 @@ def test_the_registry_declares_exactly_the_six_file_reads_executable():
 
     assert set(EXECUTABLE_OPERATIONS) == {
         "outlook.search", "outlook.read", "calendar.search",
+        "teams.list_teams", "teams.list_channels",
     } | set(WP7_EXECUTABLE)
 
     assert {

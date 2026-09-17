@@ -828,6 +828,8 @@ EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "onedrive.search",
     "onedrive.read",
     "onedrive.download_files",
+    "teams.list_teams",
+    "teams.list_channels",
 )
 
 
@@ -1024,6 +1026,63 @@ def drive_endpoints(key: str) -> tuple[DriveEndpoint, ...]:
     if key not in DRIVE_OPERATIONS:
         raise ValueError(f"{key} is not a declared sharepoint or onedrive operation")
     return tuple(endpoint for endpoint in DRIVE_ENDPOINTS if endpoint.key == key)
+# Teams Graph endpoint contracts (WP8)
+# --------------------------------------------------------------------------------------
+# Teams Graph has two application-readable collections and two delegated-only operations.
+# The endpoint rows keep the path, permission role, and strict sdk_contract case together.
+# ``joinedTeams`` and ``channels`` deliberately do not expose ``$top``: the Graph endpoint
+# does not support it, so handlers bound the number of processed response items instead.
+TEAMS_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
+    MessagingEndpoint(
+        service="teams",
+        operation="list_teams",
+        method="GET",
+        path_template="/users/{user_id}/joinedTeams",
+        container="user",
+        path_identifiers=("user_id",),
+        application_permissions=("Team.ReadBasic.All",),
+        contract_call="build_collection_request_information",
+        contract_case="teams_joined",
+    ),
+    MessagingEndpoint(
+        service="teams",
+        operation="list_channels",
+        method="GET",
+        path_template="/teams/{team_id}/channels",
+        container="team",
+        path_identifiers=("team_id",),
+        application_permissions=("Channel.ReadBasic.All",),
+        contract_call="build_collection_request_information",
+        contract_case="teams_channels",
+    ),
+    MessagingEndpoint(
+        service="teams",
+        operation="search_messages",
+        method="POST",
+        path_template="/search/query",
+        container="search",
+        contract_case="teams_search_messages",
+        contract_call="build_write_request_information",
+    ),
+    MessagingEndpoint(
+        service="teams",
+        operation="send_messages",
+        method="POST",
+        path_template="/teams/{team_id}/channels/{channel_id}/messages",
+        container="channel",
+        path_identifiers=("team_id", "channel_id"),
+        contract_case="teams_send_messages",
+        contract_call="build_write_request_information",
+    ),
+)
+TEAMS_OPERATIONS: tuple[str, ...] = tuple(f"teams.{row.operation}" for row in TEAMS_ENDPOINTS)
+
+
+def teams_endpoints(key: str) -> tuple[MessagingEndpoint, ...]:
+    """Every endpoint row declared for one Teams Graph operation."""
+    if key not in TEAMS_OPERATIONS:
+        raise ValueError(f"{key} is not a declared Teams operation")
+    return tuple(row for row in TEAMS_ENDPOINTS if row.key == key)
 
 
 # --------------------------------------------------------------------------------------
@@ -1207,6 +1266,8 @@ def _application_permissions(key: str) -> tuple[str, ...]:
         return _endpoint_permissions(messaging_endpoints(key))
     if service in ("sharepoint", "onedrive"):
         return _endpoint_permissions(drive_endpoints(key))
+    if key in TEAMS_OPERATIONS:
+        return _endpoint_permissions(teams_endpoints(key))
     return tuple(_PERMISSION_MAP[key])
 
 
@@ -1408,6 +1469,22 @@ def _todo_definition(key: str) -> OperationDefinition:
     return _endpoint_backed_definition(service="todo", key=key, endpoints=todo_endpoints(key))
 
 
+def _teams_definition(key: str) -> OperationDefinition:
+    """Registry entry for Teams Graph, with application reads only executable.
+
+    Search and send are retained in the administrative registry with their delegated scopes,
+    but application mode has no permission claim for either endpoint and therefore refuses them
+    before client construction. Delegated authentication remains not implemented until WP14.
+    """
+    return _endpoint_backed_definition(
+        service="teams",
+        key=key,
+        endpoints=teams_endpoints(key),
+        implementation_status="implemented",
+        executable=key in EXECUTABLE_OPERATIONS,
+    )
+
+
 def _messaging_definition(key: str) -> OperationDefinition:
     """Registry entry of an Outlook or Calendar operation (WP6).
 
@@ -1456,6 +1533,7 @@ OPERATION_REGISTRY = {
     **{key: _todo_definition(key) for key in TODO_OPERATIONS},
     **{key: _messaging_definition(key) for key in MESSAGING_OPERATIONS},
     **{key: _drive_definition(key) for key in DRIVE_OPERATIONS},
+    **{key: _teams_definition(key) for key in TEAMS_OPERATIONS},
 }
 
 

@@ -20,6 +20,7 @@ EXECUTABLE_READS = frozenset(
         "outlook.search", "outlook.read", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
+        "teams.list_teams", "teams.list_channels",
     }
 )
 
@@ -124,7 +125,7 @@ def test_every_operation_records_its_endpoint_write_class_and_statuses():
         assert definition.app.mode == "application", key
         assert definition.delegated.mode == "delegated", key
         assert definition.endpoint == "; ".join(definition.endpoints), key
-        if key in verified or key in MESSAGING_OPERATIONS or key in DRIVE_OPERATIONS:
+        if key in verified or key in MESSAGING_OPERATIONS or key in DRIVE_OPERATIONS or key.startswith("teams."):
             # A declared endpoint table and the strict offline contract case of every row.
             assert definition.endpoints, key
             assert definition.contract_cases, key

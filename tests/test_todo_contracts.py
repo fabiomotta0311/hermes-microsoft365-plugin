@@ -37,14 +37,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PERMISSION_MATRIX = REPO_ROOT / "microsoft365" / "references" / "graph-permissions.md"
 KNOWN_LIMITATIONS = REPO_ROOT / "docs" / "known-limitations.md"
 
-#: The exact executable set of this milestone: the nine verified reads (Outlook/Calendar and
-#: SharePoint/OneDrive). Spelled out literally, so neither a flipped write nor a lost read flag
-#: passes.
+#: The exact executable set of this milestone: the eleven verified reads (Outlook/Calendar,
+#: SharePoint/OneDrive and Teams). Spelled out literally, so neither a flipped write nor a lost
+#: read flag passes.
 EXECUTABLE_READS = frozenset(
     {
         "outlook.search", "outlook.read", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
+        "teams.list_teams", "teams.list_channels",
     }
 )
 
@@ -867,7 +868,7 @@ def test_no_todo_operation_is_executable_while_its_handler_does_not_exist():
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
-    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES)
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
     assert set(HANDLER_TABLE).isdisjoint(todo_keys)
 
 

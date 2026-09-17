@@ -339,6 +339,7 @@ def test_the_simulated_dispatch_seam_is_only_active_with_a_monkeypatch(monkeypat
         "microsoft365_calendar",
         "microsoft365_sharepoint",
         "microsoft365_onedrive",
+        "microsoft365_teams",
     }
     assert {name for name in SERVICES if f"microsoft365_{name}" in plain.tools} == {
         key.split(".", 1)[0] for key in EXECUTABLE_READS
@@ -605,7 +606,7 @@ def test_only_the_three_verified_reads_are_executable_and_every_handler_is_regis
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
-    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES)
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
 
     for key, definition in OPERATION_REGISTRY.items():
         assert definition.executable is (key in EXECUTABLE_READS), key
@@ -616,6 +617,9 @@ def test_only_the_three_verified_reads_are_executable_and_every_handler_is_regis
             # implemented and withheld, never removed (invariant 14)
             assert key in HANDLER_TABLE, key
             assert definition.write is True, key
+        elif key in {"teams.search_messages", "teams.send_messages"}:
+            assert key in HANDLER_TABLE, key
+            assert definition.write is (key == "teams.send_messages"), key
         else:
             assert key not in HANDLER_TABLE, key
         assert definition.endpoint == "; ".join(definition.endpoints), key
@@ -1079,12 +1083,13 @@ def test_dispatch_path_rejects_before_reaching_a_registered_handler(monkeypatch)
 # Invariant 15: executability is re-evaluated on the final arguments, in the dispatch path
 # --------------------------------------------------------------------------------------
 
-#: The nine reads this milestone exposes to the model.
+#: The eleven reads this milestone exposes to the model.
 EXECUTABLE_READS = frozenset(
     {
         "outlook.search", "outlook.read", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
+        "teams.list_teams", "teams.list_channels",
     }
 )
 
@@ -1198,7 +1203,7 @@ def test_the_withheld_writes_keep_their_handler_and_the_reads_are_the_only_execu
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
-    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES)
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
 
     for key in sorted(WITHHELD_WRITES):
         service, operation = key.split(".", 1)

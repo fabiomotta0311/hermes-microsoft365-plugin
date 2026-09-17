@@ -255,7 +255,7 @@ def test_load_handlers_imports_every_module_the_package_exposes():
 
     names = {module.name for module in pkgutil.iter_modules(handler_package.__path__)}
 
-    assert names == {"outlook", "calendar", "files"}
+    assert names == {"outlook", "calendar", "files", "teams"}
     load_handlers()
     for name in names:
         assert f"{handler_package.__name__}.{name}" in sys.modules
@@ -277,6 +277,9 @@ def test_a_new_service_module_is_discovered_without_editing_registration(monkeyp
     import pkgutil
 
     module_name = f"{handler_package.__name__}.sample_service"
+    registry = dict(handler_package._REGISTRY)
+    registry.pop("teams.list_teams", None)
+    monkeypatch.setattr(handler_package, "_REGISTRY", registry)
     module = types.ModuleType(module_name)
     exec(
         compile(
@@ -299,9 +302,8 @@ def test_a_new_service_module_is_discovered_without_editing_registration(monkeyp
             found.append(pkgutil.ModuleInfo(None, "sample_service", False))
         return iter(found)
 
-    # The injected registration lands in a copy of the registry, so this test cannot leak
+    # The injected registration lands in the copied registry, so this test cannot leak
     # a handler into the mapping the other tests assert on.
-    monkeypatch.setattr(handler_package, "_REGISTRY", dict(handler_package._REGISTRY))
     monkeypatch.setitem(sys.modules, module_name, module)
     monkeypatch.setattr(handler_package.pkgutil, "iter_modules", discovering_iter_modules)
 
@@ -1381,13 +1383,14 @@ def test_create_events_refuses_when_a_field_did_not_reach_the_request(monkeypatc
 # The milestone surface: three verified reads executable, four writes implemented and withheld
 # ======================================================================================
 
-#: The operations this milestone exposes to the model: the nine verified reads. Spelled out
+#: The operations this milestone exposes to the model: the eleven verified reads. Spelled out
 #: literally, so a reverted flag -- or one flag too many -- fails here.
 EXECUTABLE_OPERATIONS = frozenset(
     {
         OUTLOOK_SEARCH, OUTLOOK_READ, CALENDAR_SEARCH,
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
+        "teams.list_teams", "teams.list_channels",
     }
 )
 
@@ -1401,7 +1404,7 @@ NON_EXECUTABLE_WRITES = frozenset(
 )
 
 #: Every operation a handler exists for today: WP6 owns the Outlook/Calendar handlers and WP7
-#: owns the SharePoint/OneDrive handlers.
+#: owns the SharePoint/OneDrive handlers; WP8's delegated-only handlers are tested separately.
 IMPLEMENTED_OPERATIONS = EXECUTABLE_OPERATIONS | NON_EXECUTABLE_WRITES
 
 #: Concrete identifiers for the declared endpoint rows, and the extra arguments each contract
@@ -1477,7 +1480,7 @@ def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
     """One source of dispatch truth: ``HANDLER_TABLE`` is the self-populating registry."""
     from microsoft365.registration import HANDLER_TABLE
 
-    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS)
+    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS) | {"teams.search_messages", "teams.send_messages"}
     for key in sorted(IMPLEMENTED_OPERATIONS):
         assert callable(HANDLER_TABLE[key]), key
 
@@ -1557,7 +1560,7 @@ def test_known_limitations_records_the_milestone_state():
 
     for key in sorted(IMPLEMENTED_OPERATIONS):
         assert key in text, key
-    assert "Exactly nine operations are executable" in text
+    assert "Exactly eleven operations are executable" in text
     assert "`active_actions()` never returns them" in text
     assert "final arguments" in text
     # the pre-WP6 wording claimed nothing consumed the paginator
