@@ -637,10 +637,6 @@ def todo_write_support(key: str) -> ApplicationWriteSupport:
 #: operations derives its claim from its own endpoint table, so a blanket per-service claim
 #: cannot drift from the endpoint it belongs to.
 _PERMISSION_MAP = {
-    "sharepoint.search": ("Sites.Read.All",), "sharepoint.read": ("Sites.Read.All",),
-    "sharepoint.download_files": ("Files.Read.All",), "sharepoint.upload_files": ("Files.ReadWrite.All",),
-    "onedrive.search": ("Files.Read.All",), "onedrive.read": ("Files.Read.All",),
-    "onedrive.download_files": ("Files.Read.All",), "onedrive.upload_files": ("Files.ReadWrite.All",),
     "teams.list_teams": ("Team.ReadBasic.All",), "teams.list_channels": ("Channel.ReadBasic.All",),
     "teams.search_messages": (), "teams.send_messages": (),
 }
@@ -826,6 +822,12 @@ EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "outlook.search",
     "outlook.read",
     "calendar.search",
+    "sharepoint.search",
+    "sharepoint.read",
+    "sharepoint.download_files",
+    "onedrive.search",
+    "onedrive.read",
+    "onedrive.download_files",
 )
 
 
@@ -834,6 +836,194 @@ def messaging_endpoints(key: str) -> tuple[MessagingEndpoint, ...]:
     if key not in MESSAGING_OPERATIONS:
         raise ValueError(f"{key} is not a declared outlook or calendar operation")
     return tuple(endpoint for endpoint in MESSAGING_ENDPOINTS if endpoint.key == key)
+
+
+# --------------------------------------------------------------------------------------
+# SharePoint and OneDrive endpoint contracts (WP7)
+# --------------------------------------------------------------------------------------
+# SharePoint and OneDrive both address files through a drive; SharePoint adds sites, whose
+# default document library is a drive. The endpoint table below is declared here -- instead
+# of staying in the blanket per-service permission map -- so the role, the container, the
+# identifier set and the strict offline contract case of every operation are attributed to
+# the endpoint they belong to, exactly as Planner, To Do and Outlook/Calendar do. No
+# ``path_template`` below was assembled by hand: each one was rendered with the generated
+# builder of the ``sdk_contract`` case named next to it, and ``tests/test_handlers_files.py``
+# rebuilds every row and compares the rendered method and path with the declaration, so an
+# invented endpoint fails a test.
+#
+# No documentation page is recorded for these rows: no endpoint reference was re-read offline
+# (R10), so the claim stays ``documented_not_verified`` and the page is reported as
+# "not recorded" rather than guessed.
+
+
+@dataclass(frozen=True)
+class DriveEndpoint:
+    """One verified request target of a SharePoint or OneDrive operation.
+
+    ``sharepoint.search`` is the only operation here with several request targets: the
+    tenant-wide site search, a drive-scoped search, and the site→drive resolution step that
+    precedes a site-scoped search. The identifier set of the *operation* is the intersection
+    of its rows, so search requires no identifier while ``drive_id`` and ``site_id`` stay
+    optional (selecting the row), and the union keeps both visible instead of silently
+    unlisted. The ``drive_item_id`` path identifier of ``read``/``download_files``/
+    ``upload_files`` is the generated addressing string ``"<root|item-id>:/<relative/path>"``
+    that ``microsoft365.files.drive_item_address`` produces from the caller's ``item_id`` or
+    ``item_path``.
+    """
+
+    service: str
+    operation: str
+    method: str
+    path_template: str
+    container: str
+    path_identifiers: tuple[str, ...] = ()
+    application_permissions: tuple[str, ...] = ()
+    claim_status: str = "documented_not_verified"
+    contract_call: str = ""
+    contract_case: str = ""
+    required_headers: tuple[str, ...] = ()
+    documentation_page: str = ""
+
+    @property
+    def key(self) -> str:
+        return f"{self.service}.{self.operation}"
+
+    @property
+    def endpoint(self) -> str:
+        return f"{self.method} {self.path_template}"
+
+    @property
+    def required_identifiers(self) -> tuple[str, ...]:
+        return self.path_identifiers
+
+
+DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
+    DriveEndpoint(
+        service="sharepoint",
+        operation="search",
+        method="GET",
+        path_template="/sites",
+        container="tenant",
+        application_permissions=("Sites.Read.All",),
+        contract_call="build_search_request_information",
+        contract_case="sites_search",
+    ),
+    DriveEndpoint(
+        service="sharepoint",
+        operation="search",
+        method="GET",
+        path_template="/drives/{drive_id}/search(q='{query}')",
+        container="drive",
+        path_identifiers=("drive_id",),
+        application_permissions=("Sites.Read.All",),
+        contract_call="build_search_request_information",
+        contract_case="drive_search",
+    ),
+    DriveEndpoint(
+        service="sharepoint",
+        operation="search",
+        method="GET",
+        path_template="/sites/{site_id}/drive",
+        container="site",
+        path_identifiers=("site_id",),
+        application_permissions=("Sites.Read.All",),
+    ),
+    DriveEndpoint(
+        service="sharepoint",
+        operation="read",
+        method="GET",
+        path_template="/drives/{drive_id}/items/{drive_item_id}",
+        container="drive",
+        path_identifiers=("drive_id", "drive_item_id"),
+        application_permissions=("Sites.Read.All",),
+        contract_call="build_item_request_information",
+        contract_case="drive_item_read",
+    ),
+    DriveEndpoint(
+        service="sharepoint",
+        operation="download_files",
+        method="GET",
+        path_template="/drives/{drive_id}/items/{drive_item_id}/content",
+        container="drive",
+        path_identifiers=("drive_id", "drive_item_id"),
+        application_permissions=("Files.Read.All",),
+        contract_call="build_content_request_information",
+        contract_case="download_files",
+    ),
+    DriveEndpoint(
+        service="sharepoint",
+        operation="upload_files",
+        method="PUT",
+        path_template="/drives/{drive_id}/items/{drive_item_id}/content",
+        container="drive",
+        path_identifiers=("drive_id", "drive_item_id"),
+        application_permissions=("Files.ReadWrite.All",),
+        contract_call="build_content_request_information",
+        contract_case="upload_files",
+    ),
+    DriveEndpoint(
+        service="onedrive",
+        operation="search",
+        method="GET",
+        path_template="/drives/{drive_id}/search(q='{query}')",
+        container="drive",
+        path_identifiers=("drive_id",),
+        application_permissions=("Files.Read.All",),
+        contract_call="build_search_request_information",
+        contract_case="drive_search",
+    ),
+    DriveEndpoint(
+        service="onedrive",
+        operation="read",
+        method="GET",
+        path_template="/drives/{drive_id}/items/{drive_item_id}",
+        container="drive",
+        path_identifiers=("drive_id", "drive_item_id"),
+        application_permissions=("Files.Read.All",),
+        contract_call="build_item_request_information",
+        contract_case="drive_item_read",
+    ),
+    DriveEndpoint(
+        service="onedrive",
+        operation="download_files",
+        method="GET",
+        path_template="/drives/{drive_id}/items/{drive_item_id}/content",
+        container="drive",
+        path_identifiers=("drive_id", "drive_item_id"),
+        application_permissions=("Files.Read.All",),
+        contract_call="build_content_request_information",
+        contract_case="download_files",
+    ),
+    DriveEndpoint(
+        service="onedrive",
+        operation="upload_files",
+        method="PUT",
+        path_template="/drives/{drive_id}/items/{drive_item_id}/content",
+        container="drive",
+        path_identifiers=("drive_id", "drive_item_id"),
+        application_permissions=("Files.ReadWrite.All",),
+        contract_call="build_content_request_information",
+        contract_case="upload_files",
+    ),
+)
+
+DRIVE_OPERATIONS: tuple[str, ...] = (
+    "sharepoint.search",
+    "sharepoint.read",
+    "sharepoint.download_files",
+    "sharepoint.upload_files",
+    "onedrive.search",
+    "onedrive.read",
+    "onedrive.download_files",
+    "onedrive.upload_files",
+)
+
+
+def drive_endpoints(key: str) -> tuple[DriveEndpoint, ...]:
+    """Every verified endpoint of a SharePoint or OneDrive operation, in declaration order."""
+    if key not in DRIVE_OPERATIONS:
+        raise ValueError(f"{key} is not a declared sharepoint or onedrive operation")
+    return tuple(endpoint for endpoint in DRIVE_ENDPOINTS if endpoint.key == key)
 
 
 # --------------------------------------------------------------------------------------
@@ -1015,6 +1205,8 @@ def _application_permissions(key: str) -> tuple[str, ...]:
         return _endpoint_permissions(todo_endpoints(key))
     if key in MESSAGING_OPERATIONS:
         return _endpoint_permissions(messaging_endpoints(key))
+    if service in ("sharepoint", "onedrive"):
+        return _endpoint_permissions(drive_endpoints(key))
     return tuple(_PERMISSION_MAP[key])
 
 
@@ -1233,6 +1425,23 @@ def _messaging_definition(key: str) -> OperationDefinition:
     )
 
 
+def _drive_definition(key: str) -> OperationDefinition:
+    """Registry entry of a SharePoint or OneDrive operation (WP7).
+
+    ``implemented`` (a handler exists for every endpoint, and every endpoint is
+    contract-pinned) is the honest label, and ``executable`` is taken from the single literal
+    set :data:`EXECUTABLE_OPERATIONS`: search/read/download_files are exposed to the model for
+    both services, the two uploads are implemented and withheld (R5).
+    """
+    return _endpoint_backed_definition(
+        service=key.split(".", 1)[0],
+        key=key,
+        endpoints=drive_endpoints(key),
+        implementation_status="implemented",
+        executable=key in EXECUTABLE_OPERATIONS,
+    )
+
+
 OPERATION_REGISTRY = {
     **{
         key: OperationDefinition(
@@ -1246,6 +1455,7 @@ OPERATION_REGISTRY = {
     **{key: _planner_definition(key) for key in PLANNER_OPERATIONS},
     **{key: _todo_definition(key) for key in TODO_OPERATIONS},
     **{key: _messaging_definition(key) for key in MESSAGING_OPERATIONS},
+    **{key: _drive_definition(key) for key in DRIVE_OPERATIONS},
 }
 
 

@@ -331,12 +331,14 @@ def test_the_simulated_dispatch_seam_is_only_active_with_a_monkeypatch(monkeypat
     plain = _registered()
     simulated = _registered(monkeypatch=monkeypatch)
 
-    # Exactly the services whose operations the registry declares executable (the three
-    # verified reads of WP6) get a tool; the other five services keep only preflight.
+    # Exactly the services whose operations the registry declares executable (the nine
+    # verified reads of WP6/WP7) get a tool; the other services keep only preflight.
     assert set(plain.tools) == {
         "microsoft365_preflight",
         "microsoft365_outlook",
         "microsoft365_calendar",
+        "microsoft365_sharepoint",
+        "microsoft365_onedrive",
     }
     assert {name for name in SERVICES if f"microsoft365_{name}" in plain.tools} == {
         key.split(".", 1)[0] for key in EXECUTABLE_READS
@@ -1077,13 +1079,22 @@ def test_dispatch_path_rejects_before_reaching_a_registered_handler(monkeypatch)
 # Invariant 15: executability is re-evaluated on the final arguments, in the dispatch path
 # --------------------------------------------------------------------------------------
 
-#: The three reads this milestone exposes to the model.
-EXECUTABLE_READS = frozenset({"outlook.search", "outlook.read", "calendar.search"})
+#: The nine reads this milestone exposes to the model.
+EXECUTABLE_READS = frozenset(
+    {
+        "outlook.search", "outlook.read", "calendar.search",
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files",
+    }
+)
 
-#: The four writes WP6 implemented, contract-pinned and deliberately left non-executable
+#: The six writes implemented, contract-pinned and deliberately left non-executable
 #: while the generic host approval fix (CORE-1/CORE-2) is unreleased (R5).
 WITHHELD_WRITES = frozenset(
-    {"outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events"}
+    {
+        "outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events",
+        "sharepoint.upload_files", "onedrive.upload_files",
+    }
 )
 
 

@@ -12,15 +12,29 @@ EXPECTED_OPERATIONS = {
     "planner": ("list_plans", "list_buckets", "list_tasks", "read", "create_tasks", "update_tasks"),
 }
 
-#: The exact executable set of this milestone: the three verified reads of the Outlook/Calendar
-#: work package. Spelled out literally, so neither a flipped write nor a lost read flag passes.
-EXECUTABLE_READS = frozenset({"outlook.search", "outlook.read", "calendar.search"})
+#: The exact executable set of this milestone: the nine verified reads of the Outlook/Calendar
+#: and SharePoint/OneDrive work packages. Spelled out literally, so neither a flipped write nor
+#: a lost read flag passes.
+EXECUTABLE_READS = frozenset(
+    {
+        "outlook.search", "outlook.read", "calendar.search",
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files",
+    }
+)
 
 #: The operations whose service now declares a verified endpoint table with a contract case
 #: per row (Outlook and Calendar, WP6). Every other operation reports "not recorded".
 MESSAGING_OPERATIONS = frozenset(
     {"outlook.search", "outlook.read", "outlook.create_draft", "outlook.send",
      "calendar.search", "calendar.create_events", "calendar.update_events"}
+)
+
+#: The SharePoint and OneDrive operations, whose service now declares a verified endpoint table
+#: with a contract case per row (WP7).
+DRIVE_OPERATIONS = frozenset(
+    {"sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
+     "onedrive.search", "onedrive.read", "onedrive.download_files", "onedrive.upload_files"}
 )
 
 
@@ -110,12 +124,12 @@ def test_every_operation_records_its_endpoint_write_class_and_statuses():
         assert definition.app.mode == "application", key
         assert definition.delegated.mode == "delegated", key
         assert definition.endpoint == "; ".join(definition.endpoints), key
-        if key in verified or key in MESSAGING_OPERATIONS:
+        if key in verified or key in MESSAGING_OPERATIONS or key in DRIVE_OPERATIONS:
             # A declared endpoint table and the strict offline contract case of every row.
             assert definition.endpoints, key
             assert definition.contract_cases, key
         else:
-            # No endpoint table is declared for this service yet (WP7-WP9 add them):
+            # No endpoint table is declared for this service yet (WP8-WP9 add them):
             # the endpoint is reported as unrecorded rather than invented.
             assert definition.endpoints == (), key
             assert definition.contract_cases == (), key

@@ -37,12 +37,23 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PERMISSION_MATRIX = REPO_ROOT / "microsoft365" / "references" / "graph-permissions.md"
 KNOWN_LIMITATIONS = REPO_ROOT / "docs" / "known-limitations.md"
 
-#: The exact executable set of this milestone: the three verified Outlook/Calendar reads.
-EXECUTABLE_READS = frozenset({"outlook.search", "outlook.read", "calendar.search"})
+#: The exact executable set of this milestone: the nine verified reads (Outlook/Calendar and
+#: SharePoint/OneDrive). Spelled out literally, so neither a flipped write nor a lost read flag
+#: passes.
+EXECUTABLE_READS = frozenset(
+    {
+        "outlook.search", "outlook.read", "calendar.search",
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files",
+    }
+)
 
-#: The four writes WP6 implemented and this milestone keeps non-executable (R5).
+#: The six writes implemented and this milestone keeps non-executable (R5).
 WITHHELD_WRITES = frozenset(
-    {"outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events"}
+    {
+        "outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events",
+        "sharepoint.upload_files", "onedrive.upload_files",
+    }
 )
 
 

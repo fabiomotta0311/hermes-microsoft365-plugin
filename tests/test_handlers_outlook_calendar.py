@@ -255,7 +255,7 @@ def test_load_handlers_imports_every_module_the_package_exposes():
 
     names = {module.name for module in pkgutil.iter_modules(handler_package.__path__)}
 
-    assert names == {"outlook", "calendar"}
+    assert names == {"outlook", "calendar", "files"}
     load_handlers()
     for name in names:
         assert f"{handler_package.__name__}.{name}" in sys.modules
@@ -1381,17 +1381,27 @@ def test_create_events_refuses_when_a_field_did_not_reach_the_request(monkeypatc
 # The milestone surface: three verified reads executable, four writes implemented and withheld
 # ======================================================================================
 
-#: The operations this milestone exposes to the model: the three verified reads. Spelled out
+#: The operations this milestone exposes to the model: the nine verified reads. Spelled out
 #: literally, so a reverted flag -- or one flag too many -- fails here.
-EXECUTABLE_OPERATIONS = frozenset({OUTLOOK_SEARCH, OUTLOOK_READ, CALENDAR_SEARCH})
-
-#: The four writes: implemented, contract-pinned, exercised offline through the seam, and
-#: non-executable until the generic host approval fix (CORE-1/CORE-2) is available (R5).
-NON_EXECUTABLE_WRITES = frozenset(
-    {OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS}
+EXECUTABLE_OPERATIONS = frozenset(
+    {
+        OUTLOOK_SEARCH, OUTLOOK_READ, CALENDAR_SEARCH,
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files",
+    }
 )
 
-#: Every operation a handler exists for today: WP6 owns all of them.
+#: The six writes: implemented, contract-pinned, exercised offline through the seam, and
+#: non-executable until the generic host approval fix (CORE-1/CORE-2) is available (R5).
+NON_EXECUTABLE_WRITES = frozenset(
+    {
+        OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS,
+        "sharepoint.upload_files", "onedrive.upload_files",
+    }
+)
+
+#: Every operation a handler exists for today: WP6 owns the Outlook/Calendar handlers and WP7
+#: owns the SharePoint/OneDrive handlers.
 IMPLEMENTED_OPERATIONS = EXECUTABLE_OPERATIONS | NON_EXECUTABLE_WRITES
 
 #: Concrete identifiers for the declared endpoint rows, and the extra arguments each contract
@@ -1447,7 +1457,7 @@ def test_the_registry_declares_exactly_the_three_verified_reads_executable():
 
     assert {
         key for key in OPERATION_REGISTRY if key.startswith(("outlook.", "calendar."))
-    } == set(IMPLEMENTED_OPERATIONS)
+    } == set(WP6_HANDLERS)
 
 
 def test_operation_status_exposes_the_reads_and_withholds_every_write():
@@ -1477,7 +1487,7 @@ def test_the_declared_messaging_endpoints_are_the_ones_the_sdk_contract_builds()
     from microsoft365 import sdk_contract
     from microsoft365.contract import messaging_endpoints
 
-    for key in sorted(IMPLEMENTED_OPERATIONS):
+    for key in sorted(WP6_HANDLERS):
         endpoints = messaging_endpoints(key)
         assert endpoints, key
         for endpoint in endpoints:
@@ -1536,8 +1546,9 @@ def test_the_reads_are_model_facing_and_the_withheld_writes_keep_their_handler()
         assert operation not in enum, key
 
     # Not dead code: the withheld writes are exactly the ones the parametrized seam tests
-    # above drive to a real request through the strict double.
-    assert {key for key, *_ in WRITE_CALLS} == set(NON_EXECUTABLE_WRITES)
+    # above drive to a real request through the strict double. The two SharePoint/OneDrive
+    # uploads are driven to a real request in tests/test_handlers_files.py instead.
+    assert {key for key, *_ in WRITE_CALLS} == set(WP6_WRITES)
 
 
 def test_known_limitations_records_the_milestone_state():
@@ -1546,10 +1557,10 @@ def test_known_limitations_records_the_milestone_state():
 
     for key in sorted(IMPLEMENTED_OPERATIONS):
         assert key in text, key
-    assert "Exactly three operations are executable" in text
+    assert "Exactly nine operations are executable" in text
     assert "`active_actions()` never returns them" in text
     assert "final arguments" in text
     # the pre-WP6 wording claimed nothing consumed the paginator
-    assert "The two executable reads consume it" in text
+    assert "The four executable search reads consume it" in text
     # and that a list-valued PATCH field was unimplemented everywhere
     assert "so affected updates stay unimplemented" not in text
