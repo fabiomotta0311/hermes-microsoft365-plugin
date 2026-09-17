@@ -608,11 +608,8 @@ def test_registration_payload_categories_are_taxonomy_categories(monkeypatch):
     from microsoft365.contract import Settings
     from microsoft365.registration import service_tool_handler
 
-    # An operation no handler exists for keeps the explicit unimplemented payload.
-    assert json.loads(service_tool_handler("planner", {"action": "list_plans"})) == {
-        "error": "operation_not_implemented",
-        "service": "planner",
-    }
+    # Direct dispatch without settings fails closed before client construction.
+    assert json.loads(service_tool_handler("planner", {"action": "list_plans"}))["error"] == "configuration_error"
 
     # ``outlook.search`` is executable, so dispatch really runs. With no credential available
     # the honest category is ``authentication_required`` -- the operation is implemented and the

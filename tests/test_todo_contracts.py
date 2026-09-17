@@ -37,8 +37,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PERMISSION_MATRIX = REPO_ROOT / "microsoft365" / "references" / "graph-permissions.md"
 KNOWN_LIMITATIONS = REPO_ROOT / "docs" / "known-limitations.md"
 
-#: The exact executable set of this milestone: the eleven verified reads (Outlook/Calendar,
-#: SharePoint/OneDrive and Teams). Spelled out literally, so neither a flipped write nor a lost
+#: The exact executable set of this milestone, including WP9 reads. Spelled out literally, so neither a flipped write nor a lost
 #: read flag passes.
 EXECUTABLE_READS = frozenset(
     {
@@ -46,14 +45,17 @@ EXECUTABLE_READS = frozenset(
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels",
+        "todo.list_task_lists", "todo.search", "todo.read",
+        "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }
 )
 
-#: The six writes implemented and this milestone keeps non-executable (R5).
+#: Writes implemented and this milestone keeps non-executable (R5).
 WITHHELD_WRITES = frozenset(
     {
         "outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events",
         "sharepoint.upload_files", "onedrive.upload_files",
+        "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )
 
@@ -851,14 +853,14 @@ def test_no_todo_operation_is_executable_while_its_handler_does_not_exist():
     assert todo_keys == sorted(EXPECTED_OPERATION_CONTRACTS)
     for key in todo_keys:
         definition = OPERATION_REGISTRY[key]
-        assert definition.implementation_status == "contract_verified", key
+        assert definition.implementation_status == "implemented", key
         assert definition.executable is (key in EXECUTABLE_READS), key
-        assert key not in HANDLER_TABLE, key
+        assert key in HANDLER_TABLE, key
 
         service, operation = key.split(".", 1)
         status = operation_status("application", service, operation)
         assert status.executable is (key in EXECUTABLE_READS), key
-        assert status.implementation_status == "contract_verified", key
+        assert status.implementation_status == "implemented", key
         expected_auth = "not_verified" if key in TODO_WRITE_KEYS else "supported"
         assert status.auth_status == expected_auth, key
 
@@ -869,7 +871,7 @@ def test_no_todo_operation_is_executable_while_its_handler_does_not_exist():
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
     assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
-    assert set(HANDLER_TABLE).isdisjoint(todo_keys)
+    assert set(todo_keys).issubset(HANDLER_TABLE)
 
 
 def test_todo_writes_keep_explicit_not_verified_status_until_endpoint_evidence_exists():
@@ -1032,8 +1034,8 @@ def test_preflight_reports_todo_claims_without_claiming_execution():
     assert sorted(payload["operation_status"]) == sorted(EXPECTED_CLAIMS)
     for key, status in payload["operation_status"].items():
         assert status["permissions"] == list(EXPECTED_CLAIMS[key])
-        assert status["implementation_status"] == "contract_verified"
-        assert status["executable"] is False
+        assert status["implementation_status"] == "implemented"
+        assert status["executable"] is (key in EXECUTABLE_READS)
         assert status["write"] is (key in TODO_WRITE_KEYS)
     assert payload["locally_ready"] is False
     assert payload["remote_verification"] == "not_tested"
@@ -1109,7 +1111,7 @@ def test_known_limitations_records_the_todo_contract_state():
     text = KNOWN_LIMITATIONS.read_text(encoding="utf-8")
 
     assert "tests/test_todo_contracts.py" in text
-    assert "No Microsoft To Do operation is executable yet" in text
+    assert "The three To Do reads are executable" in text
     assert "documented_not_verified" in text
     # the pre-WP3 wording claimed To Do application-write support was merely pending; the
     # state is now explicit and derived

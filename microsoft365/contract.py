@@ -830,6 +830,13 @@ EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "onedrive.download_files",
     "teams.list_teams",
     "teams.list_channels",
+    "todo.list_task_lists",
+    "todo.search",
+    "todo.read",
+    "planner.list_plans",
+    "planner.list_buckets",
+    "planner.list_tasks",
+    "planner.read",
 )
 
 
@@ -1461,12 +1468,16 @@ class OperationDefinition:
 
 def _planner_definition(key: str) -> OperationDefinition:
     return _endpoint_backed_definition(
-        service="planner", key=key, endpoints=planner_endpoints(key)
+        service="planner", key=key, endpoints=planner_endpoints(key),
+        implementation_status="implemented", executable=key in EXECUTABLE_OPERATIONS,
     )
 
 
 def _todo_definition(key: str) -> OperationDefinition:
-    return _endpoint_backed_definition(service="todo", key=key, endpoints=todo_endpoints(key))
+    return _endpoint_backed_definition(
+        service="todo", key=key, endpoints=todo_endpoints(key),
+        implementation_status="implemented", executable=key in EXECUTABLE_OPERATIONS,
+    )
 
 
 def _teams_definition(key: str) -> OperationDefinition:

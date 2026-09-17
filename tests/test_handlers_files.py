@@ -232,7 +232,7 @@ def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
         "calendar.search", "calendar.create_events", "calendar.update_events",
         "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages",
     } | set(WP7_HANDLERS)
-    assert set(HANDLER_TABLE) == implemented
+    assert set(HANDLER_TABLE) == implemented | {"todo.list_task_lists", "todo.search", "todo.read", "todo.create_tasks", "todo.update_tasks", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read", "planner.create_tasks", "planner.update_tasks"}
     for key in sorted(WP7_HANDLERS):
         assert callable(HANDLER_TABLE[key]), key
 
@@ -611,7 +611,7 @@ def test_the_registry_declares_exactly_the_six_file_reads_executable():
     assert set(EXECUTABLE_OPERATIONS) == {
         "outlook.search", "outlook.read", "calendar.search",
         "teams.list_teams", "teams.list_channels",
-    } | set(WP7_EXECUTABLE)
+    } | set(WP7_EXECUTABLE) | {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}
 
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable

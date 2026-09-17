@@ -28,13 +28,13 @@ headers from those endpoints, so a claim cannot drift from the endpoint it belon
 
 | Operation | Endpoint | Application role | Permission claim | Implementation status | Recorded endpoint reference |
 |---|---|---|---|---|---|
-| `planner.list_plans` | `GET /planner/plans` | `Tasks.Read.All` | `documented_not_verified` | `contract_verified` | not recorded |
-| `planner.list_plans` | `GET /groups/{group_id}/planner/plans` | `Tasks.Read.All` | `documented_not_verified` | `contract_verified` | not recorded |
-| `planner.list_buckets` | `GET /planner/plans/{plan_id}/buckets` | `Tasks.Read.All` | `documented_not_verified` | `contract_verified` | not recorded |
-| `planner.list_tasks` | `GET /planner/plans/{plan_id}/tasks` | `Tasks.Read.All` | `documented_not_verified` | `contract_verified` | https://learn.microsoft.com/en-us/graph/api/plannerplan-list-tasks |
-| `planner.read` | `GET /planner/tasks/{planner_task_id}` | `Tasks.Read.All` | `documented_not_verified` | `contract_verified` | not recorded |
-| `planner.create_tasks` | `POST /planner/tasks` | `Tasks.ReadWrite.All` | `documented_not_verified` | `contract_verified` | https://learn.microsoft.com/en-us/graph/api/planner-post-tasks |
-| `planner.update_tasks` | `PATCH /planner/tasks/{planner_task_id}` | `Tasks.ReadWrite.All` | `documented_not_verified` | `contract_verified` | https://learn.microsoft.com/en-us/graph/api/plannertask-update |
+| `planner.list_plans` | `GET /planner/plans` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `planner.list_plans` | `GET /groups/{group_id}/planner/plans` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `planner.list_buckets` | `GET /planner/plans/{plan_id}/buckets` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `planner.list_tasks` | `GET /planner/plans/{plan_id}/tasks` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/plannerplan-list-tasks |
+| `planner.read` | `GET /planner/tasks/{planner_task_id}` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `planner.create_tasks` | `POST /planner/tasks` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/planner-post-tasks |
+| `planner.update_tasks` | `PATCH /planner/tasks/{planner_task_id}` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/plannertask-update |
 
 ### Container semantics (decision recorded by WP2)
 
@@ -72,11 +72,7 @@ client, approval or token work happens.
 
 ### Implementation status legend
 
-- `contract_verified` -- every endpoint the operation uses is pinned by a strict offline request-contract
-  test (`tests/test_planner_contracts.py`); no handler exists, so the operation is **not executable** and
-  cannot reach Graph through this plugin.
-- `implemented` -- reserved. Requires a registered handler **and** a strict contract test; no Planner
-  operation qualifies yet.
+- `implemented` -- every endpoint the operation uses is pinned by a strict offline request-contract test and a registered handler. Reads may be executable when explicitly included in the registry set; writes remain withheld until CORE-1/CORE-2.
 
 ## Microsoft To Do endpoint claims
 
@@ -90,11 +86,11 @@ and the registry disagree.
 
 | Operation | Endpoint | Application role | Permission claim | Implementation status | Recorded endpoint reference |
 |---|---|---|---|---|---|
-| `todo.list_task_lists` | `GET /users/{user_id}/todo/lists` | `Tasks.Read.All` | `documented_not_verified` | `contract_verified` | not recorded |
-| `todo.search` | `GET /users/{user_id}/todo/lists/{todo_list_id}/tasks` | `Tasks.Read.All` | `documented_not_verified` | `contract_verified` | https://learn.microsoft.com/en-us/graph/api/todotasklist-list-tasks |
-| `todo.read` | `GET /users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}` | `Tasks.Read.All` | `documented_not_verified` | `contract_verified` | not recorded |
-| `todo.create_tasks` | `POST /users/{user_id}/todo/lists/{todo_list_id}/tasks` | `Tasks.ReadWrite.All` | `documented_not_verified` | `contract_verified` | not recorded |
-| `todo.update_tasks` | `PATCH /users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}` | `Tasks.ReadWrite.All` | `documented_not_verified` | `contract_verified` | not recorded |
+| `todo.list_task_lists` | `GET /users/{user_id}/todo/lists` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `todo.search` | `GET /users/{user_id}/todo/lists/{todo_list_id}/tasks` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/todotasklist-list-tasks |
+| `todo.read` | `GET /users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `todo.create_tasks` | `POST /users/{user_id}/todo/lists/{todo_list_id}/tasks` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | not recorded |
+| `todo.update_tasks` | `PATCH /users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | not recorded |
 
 The `sdk_contract` case of each row, in the same order, is `todo_lists`, `todo_tasks`, `todo_read`,
 `todo_create_tasks` and `todo_update_tasks`. Only the task listing carries a recorded reference; the

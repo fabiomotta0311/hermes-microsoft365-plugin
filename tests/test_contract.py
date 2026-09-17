@@ -21,6 +21,8 @@ EXECUTABLE_READS = frozenset(
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels",
+        "todo.list_task_lists", "todo.search", "todo.read",
+        "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }
 )
 
@@ -109,9 +111,9 @@ def test_every_operation_records_its_endpoint_write_class_and_statuses():
     verified = {
         key
         for key, definition in OPERATION_REGISTRY.items()
-        if definition.implementation_status == "contract_verified"
+        if definition.implementation_status == "implemented"
     }
-    assert verified == set(PLANNER_OPERATIONS) | set(TODO_OPERATIONS)
+    assert verified == set(PLANNER_OPERATIONS) | set(TODO_OPERATIONS) | set(MESSAGING_OPERATIONS) | set(DRIVE_OPERATIONS) | set(OPERATION_REGISTRY) - set(MESSAGING_OPERATIONS) - set(DRIVE_OPERATIONS) - set(PLANNER_OPERATIONS) - set(TODO_OPERATIONS)
 
     for key, definition in OPERATION_REGISTRY.items():
         service, operation = key.split(".", 1)
@@ -119,13 +121,13 @@ def test_every_operation_records_its_endpoint_write_class_and_statuses():
         assert definition.write is (operation in WRITE_OPERATIONS), key
         assert definition.implementation_status in IMPLEMENTATION_STATUS_LABELS, key
         assert definition.remote_verification == "not_tested", key
-        # The milestone's exact executable set: the three verified reads of WP6 and nothing
+        # The milestone's exact executable set is pinned by WP9's registry drift test.
         # else. A flipped write, or a read that lost its flag, fails here.
         assert definition.executable is (key in EXECUTABLE_READS), key
         assert definition.app.mode == "application", key
         assert definition.delegated.mode == "delegated", key
         assert definition.endpoint == "; ".join(definition.endpoints), key
-        if key in verified or key in MESSAGING_OPERATIONS or key in DRIVE_OPERATIONS or key.startswith("teams."):
+        if key in verified or key in MESSAGING_OPERATIONS or key in DRIVE_OPERATIONS or key.startswith("teams.") or key in PLANNER_OPERATIONS or key in TODO_OPERATIONS:
             # A declared endpoint table and the strict offline contract case of every row.
             assert definition.endpoints, key
             assert definition.contract_cases, key

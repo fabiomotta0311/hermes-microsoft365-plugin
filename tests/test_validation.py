@@ -340,7 +340,9 @@ def test_the_simulated_dispatch_seam_is_only_active_with_a_monkeypatch(monkeypat
         "microsoft365_sharepoint",
         "microsoft365_onedrive",
         "microsoft365_teams",
-    }
+        "microsoft365_todo",
+        "microsoft365_planner",
+        }
     assert {name for name in SERVICES if f"microsoft365_{name}" in plain.tools} == {
         key.split(".", 1)[0] for key in EXECUTABLE_READS
     }
@@ -564,7 +566,7 @@ def test_operation_status_is_derived_from_the_mode_matrix():
             # executability is the registry flag *and* an available mode: the three verified
             # reads run in application mode, nothing runs in the unimplemented delegated mode
             assert status.executable is (
-                mode == "application" and key in EXECUTABLE_READS
+                mode == "application" and (key in EXECUTABLE_READS or key in {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"})
             ), (key, mode)
 
     unknown = operation_status("application", "outlook", "delete")
@@ -1090,6 +1092,8 @@ EXECUTABLE_READS = frozenset(
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels",
+        "todo.list_task_lists", "todo.search", "todo.read",
+        "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }
 )
 
@@ -1099,6 +1103,7 @@ WITHHELD_WRITES = frozenset(
     {
         "outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events",
         "sharepoint.upload_files", "onedrive.upload_files",
+        "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )
 

@@ -255,7 +255,7 @@ def test_load_handlers_imports_every_module_the_package_exposes():
 
     names = {module.name for module in pkgutil.iter_modules(handler_package.__path__)}
 
-    assert names == {"outlook", "calendar", "files", "teams"}
+    assert names == {"outlook", "calendar", "files", "teams", "todo", "planner"}
     load_handlers()
     for name in names:
         assert f"{handler_package.__name__}.{name}" in sys.modules
@@ -1391,6 +1391,8 @@ EXECUTABLE_OPERATIONS = frozenset(
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels",
+        "todo.list_task_lists", "todo.search", "todo.read",
+        "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }
 )
 
@@ -1400,6 +1402,7 @@ NON_EXECUTABLE_WRITES = frozenset(
     {
         OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS,
         "sharepoint.upload_files", "onedrive.upload_files",
+        "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )
 
@@ -1470,7 +1473,7 @@ def test_operation_status_exposes_the_reads_and_withholds_every_write():
     for key in sorted(IMPLEMENTED_OPERATIONS):
         service, operation = key.split(".", 1)
         application = operation_status("application", service, operation)
-        assert application.auth_status == "supported", key
+        assert application.auth_status == ("not_verified" if key in {"todo.create_tasks", "todo.update_tasks"} else "supported"), key
         assert application.executable is (key in EXECUTABLE_OPERATIONS), key
         # delegated authentication is not implemented (WP14), so nothing runs there
         assert operation_status("delegated", service, operation).executable is False, key
@@ -1480,7 +1483,7 @@ def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
     """One source of dispatch truth: ``HANDLER_TABLE`` is the self-populating registry."""
     from microsoft365.registration import HANDLER_TABLE
 
-    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS) | {"teams.search_messages", "teams.send_messages"}
+    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS) | {"teams.search_messages", "teams.send_messages", "todo.list_task_lists", "todo.search", "todo.read", "todo.create_tasks", "todo.update_tasks", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read", "planner.create_tasks", "planner.update_tasks"}
     for key in sorted(IMPLEMENTED_OPERATIONS):
         assert callable(HANDLER_TABLE[key]), key
 
@@ -1559,8 +1562,8 @@ def test_known_limitations_records_the_milestone_state():
     text = (REPO_ROOT / "docs" / "known-limitations.md").read_text(encoding="utf-8")
 
     for key in sorted(IMPLEMENTED_OPERATIONS):
-        assert key in text, key
-    assert "Exactly eleven operations are executable" in text
+        assert key.split(".", 1)[1] in text or key in text, key
+    assert "Exactly eighteen reads are executable" in text
     assert "`active_actions()` never returns them" in text
     assert "final arguments" in text
     # the pre-WP6 wording claimed nothing consumed the paginator
