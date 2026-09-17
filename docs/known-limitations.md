@@ -6,7 +6,7 @@ This document states the boundary of the first standalone milestone. It is not r
 
 - Only application/client-credentials client construction is implemented. Delegated OAuth, secure delegated token caching, and account-selection UX remain open.
 - Authentication, tenant consent, endpoint permissions, throttling, pagination, and write cleanup have not been tested against an authorized test tenant.
-- Operations lacking a strict executable contract remain in the administrative registry and preflight status; they are not deleted and are not registered in active action enums. Exactly three operations are executable today -- `outlook.search`, `outlook.read` and `calendar.search` -- and every write stays non-executable until the host approval fix under "Host dependency" lands.
+- Operations lacking a strict executable contract remain in the administrative registry and preflight status; they are not deleted and are not registered in active action enums. Exactly five operations are executable today -- `outlook.search`, `outlook.read`, `calendar.search`, `teams.list_teams` and `teams.list_channels` -- and every write stays non-executable until the host approval fix under "Host dependency" lands.
 - Microsoft Search chat-message support and large-file transfer sessions require further endpoint-specific work.
 
 ## Planner
@@ -27,6 +27,13 @@ This document states the boundary of the first standalone milestone. It is not r
 - `outlook.send` has two endpoints -- `/users/{user_id}/sendMail` for a composed message and `/users/{user_id}/messages/{message_id}/send` for a draft that already exists -- and supplying both forms, or neither, is refused instead of silently sending one.
 - An offsetless date and time must be accompanied by `time_zone`, and `calendar.search` refuses `start_date_time`/`end_date_time`/`time_zone` because the endpoint's acceptance of a date filter is not recorded offline; `calendar.update_events` requires the ETag it cannot be conditional without.
 - `calendar.search` and `outlook.search` apply the caller's item budget through the paginator, so the first multi-page paths in the plugin are the two executable reads.
+
+## Teams Graph
+
+- Teams Graph handlers are registered for `list_teams`, `list_channels`, `search_messages` and `send_messages`. The first two are implemented and executable in application mode through `users/{user_id}/joinedTeams` and `teams/{team_id}/channels`.
+- `joinedTeams` does not accept OData query parameters, and the channels endpoint does not accept `$top`; the handlers process returned collections within the shared item budget. Channels may use typed `$select`.
+- `search_messages` uses the generated `search/query` POST body (`QueryPostRequestBody` containing `SearchRequest`/`SearchQuery` for `chatMessage`), and `send_messages` uses a generated `ChatMessage` on the channel `messages` collection. Both remain delegated-only: application mode has no permission claim and dispatch refuses them before client or credential work; delegated scopes are recorded as `Chat.Read` + `ChannelMessage.Read.All` and `ChannelMessage.Send`, respectively.
+- Delegated authentication is not implemented until WP14, so delegated Teams operations are described in the matrix but are not executable. Bot Framework files (`plugins/platforms/teams` and `teams_pipeline`) are intentionally untouched.
 
 ## Microsoft To Do
 
