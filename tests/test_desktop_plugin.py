@@ -14,6 +14,8 @@ def test_desktop_shell_is_static_safe_and_registered():
     for text in ("Microsoft 365", "Alpha", "não contata a Microsoft", "Delegated", "Application"):
         assert text in source
     assert "ctx.rest(" not in source
+    assert "ctx.host" not in source
+    assert "host.navigate" in source
     assert "access_token" not in source
     assert "client_secret" not in source
     assert "fake" not in source.lower()

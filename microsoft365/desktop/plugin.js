@@ -1,4 +1,4 @@
-import { Button, Badge, ROUTES_AREA, SIDEBAR_NAV_AREA, PALETTE_AREA } from "@hermes/plugin-sdk";
+import { Button, Badge, ROUTES_AREA, SIDEBAR_NAV_AREA, PALETTE_AREA, host } from "@hermes/plugin-sdk";
 import { useEffect, useState } from "react";
 import { jsx } from "react/jsx-runtime";
 
@@ -58,7 +58,7 @@ function Section({ title, children }) {
   ] });
 }
 
-function Microsoft365Page({ ctx, host }) {
+function Microsoft365Page({ ctx }) {
   const [draft, setDraft] = useState(INITIAL_DRAFT);
   const [loaded, setLoaded] = useState(false);
   const key = storageName(host);
@@ -125,8 +125,7 @@ export default {
   name: "Microsoft 365",
   defaultEnabled: false,
   register(ctx) {
-    const host = ctx.host;
-    ctx.register({ id: "microsoft365-route", area: ROUTES_AREA, data: { path: "/microsoft365" }, render: () => jsx(Microsoft365Page, { ctx, host }) });
+    ctx.register({ id: "microsoft365-route", area: ROUTES_AREA, data: { path: "/microsoft365" }, render: () => jsx(Microsoft365Page, { ctx }) });
     ctx.register({ id: "microsoft365-sidebar", area: SIDEBAR_NAV_AREA, data: { path: "/microsoft365", label: "Microsoft 365", codicon: "cloud" } });
     ctx.register({ id: "microsoft365-command", area: PALETTE_AREA, data: { label: "Configurar Microsoft 365", keywords: ["Microsoft", "365", "configuração"] }, run: () => host.navigate("/microsoft365") });
   },
