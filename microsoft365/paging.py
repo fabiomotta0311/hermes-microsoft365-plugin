@@ -38,8 +38,8 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 from urllib.parse import parse_qsl, unquote, urlsplit
 
-from microsoft365.execution import ExecutionError, execute_request, request_information_sender
-from microsoft365.results import normalize_collection_page
+from .execution import ExecutionError, execute_request, request_information_sender
+from .results import normalize_collection_page
 
 GRAPH_HOST = "graph.microsoft.com"
 GRAPH_VERSION_PATH = "/v1.0"
