@@ -36,6 +36,8 @@ capabilities:
 
 Capability values must be actual YAML booleans. Strings (`"false"`), numbers, unknown services, and unknown operations are configuration errors. A service with no executable selected actions is not registered as a model-facing tool, but every selected operation remains visible in `microsoft365_preflight`.
 
+The manifest declares the union of the default and maximum configured registrations: `microsoft365_preflight` plus the seven service tool names. Runtime registration remains conditional, so disabled services do not receive model-facing schemas. This keeps catalog metadata truthful without exposing disabled operations.
+
 ## Product contract
 
 The administrative registry retains all operations:

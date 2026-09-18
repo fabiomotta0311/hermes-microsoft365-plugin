@@ -22,6 +22,13 @@ requires_env:
     secret: true
 provides_tools:
   - microsoft365_preflight
+  - microsoft365_outlook
+  - microsoft365_sharepoint
+  - microsoft365_onedrive
+  - microsoft365_calendar
+  - microsoft365_teams
+  - microsoft365_todo
+  - microsoft365_planner
 provides_hooks:
   - pre_tool_call
 config_schema:
