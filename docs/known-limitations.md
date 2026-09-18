@@ -65,6 +65,6 @@ Hermes currently has a generic approval modification-order defect described in t
 
 ## Delivery
 
-- The repository is not yet in the Hermes plugin catalog and has no SHA-pinned catalog entry.
+- The repository has a SHA-pinned catalog proposal in upstream PR #114530, but it is not official until that PR is merged.
 - Plugin validation/doctor are CI gates only where the pinned Hermes release exposes the commands compatibly.
-- No production support, release readiness, or remote tenant behavior is claimed.
+- No production support or remote tenant behavior is claimed; the current release remains pre-release.

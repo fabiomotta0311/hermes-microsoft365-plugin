@@ -14,8 +14,8 @@ All notable changes to this project are documented here.
 - Established the offline-verified standalone Microsoft 365 Graph plugin foundation.
 - Added strict capability validation, operation registry reporting, bounded file transfer,
   paging, and typed SDK request contracts.
-- No Microsoft 365 tenant was contacted; no catalog entry, tag, signature, or production
-  support claim is made by this pre-release.
+- No Microsoft 365 tenant was contacted; the catalog entry is proposed in upstream PR
+  #114530, and this pre-release makes no signature, tenant, or production support claim.
 
 [Unreleased]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/compare/main...HEAD
 [0.1.0a1]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a1

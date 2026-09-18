@@ -1,8 +1,9 @@
 # Release procedure
 
-This repository currently prepares release evidence; it does not publish a GitHub
-release, create a tag, submit a catalog entry, sign artifacts, or generate a GitHub
-artifact attestation.
+This repository prepares reproducible release evidence. The current `0.1.0a1`
+pre-release is eligible for a maintainer-reviewed tag and SHA-pinned catalog proposal;
+that proposal remains non-official until upstream admission. This workflow does not
+sign artifacts or generate a GitHub artifact attestation.
 
 ## Before a release candidate
 
