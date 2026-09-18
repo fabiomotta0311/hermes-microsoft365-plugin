@@ -241,7 +241,7 @@ def test_service_tool_handler_keeps_unavailable_default_for_unhandled_operations
     """No handler, no dispatch: the payload is unchanged for an operation without one."""
     from microsoft365 import registration
 
-    assert json.loads(registration.service_tool_handler("planner", {"action": "list_plans"}))["error"] == "authentication_required"
+    assert json.loads(registration.service_tool_handler("planner", {"action": "list_plans"}))["error"] == "configuration_error"
     assert json.loads(registration.service_tool_handler("planner", None)) == {
         "error": "operation_not_implemented",
         "service": "planner",

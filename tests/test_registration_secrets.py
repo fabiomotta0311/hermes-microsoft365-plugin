@@ -19,6 +19,35 @@ class RecordingContext:
         self.hooks[name] = callback
 
 
+def test_dispatch_tables_keep_profile_context_across_a_b_a(monkeypatch):
+    from dataclasses import replace
+
+    from microsoft365 import handlers, registration
+    from microsoft365.contract import Settings
+
+    seen = []
+
+    def record_profile(args, context):
+        del args
+        seen.append(context.settings.client_id)
+        return {"profile": context.settings.client_id}
+
+    monkeypatch.setitem(
+        handlers._REGISTRY,
+        "outlook.search",
+        replace(handlers._REGISTRY["outlook.search"], function=record_profile),
+    )
+    profile_a = Settings(tenant_id="tenant", client_id="profile-a")
+    profile_b = Settings(tenant_id="tenant", client_id="profile-b")
+    table_a = registration._dispatch_table(profile_a)
+    table_b = registration._dispatch_table(profile_b)
+
+    assert table_a["outlook.search"]({"action": "search"}) == {"profile": "profile-a"}
+    assert table_b["outlook.search"]({"action": "search"}) == {"profile": "profile-b"}
+    assert table_a["outlook.search"]({"action": "search"}) == {"profile": "profile-a"}
+    assert seen == ["profile-a", "profile-b", "profile-a"]
+
+
 def test_registration_does_not_resolve_or_capture_secret(monkeypatch):
     import agent.secret_scope
     from microsoft365 import register

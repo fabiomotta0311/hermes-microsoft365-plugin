@@ -20,19 +20,20 @@ from .preflight import build_preflight
 from .validation import check as check_operation_arguments
 
 
-def _handler_context() -> HandlerContext:
+def _handler_context(settings: Settings | None) -> HandlerContext:
     """The context a registered handler runs with: the configuration of the running dispatch.
 
     The client factory is a *factory*: no secret is read, no credential is constructed and no
     client exists until a handler asks for one, which is after every check it makes itself.
     """
-    settings = _DISPATCH_SETTINGS
+    if not isinstance(settings, Settings):
+        raise ExecutionError("configuration_error", "Microsoft 365 dispatch configuration is ambiguous")
     return HandlerContext(
         settings=settings, client_factory=lambda: create_graph_client(settings)
     )
 
 
-def _host_facing(record) -> Callable[[dict], Any]:
+def _host_facing(record, settings: Settings | None) -> Callable[[dict], Any]:
     """One registered operation handler, in the call shape the host registers.
 
     ``handlers`` modules register ``(arguments, context)`` callables, which is what keeps the
@@ -42,12 +43,12 @@ def _host_facing(record) -> Callable[[dict], Any]:
     """
 
     def invoke(args):
-        return record.function(args, _handler_context())
+        return record.function(args, _handler_context(settings))
 
     return invoke
 
 
-def _dispatch_table() -> dict[str, Callable[[dict], Any]]:
+def _dispatch_table(settings: Settings | None = None) -> dict[str, Callable[[dict], Any]]:
     """The dispatch mapping, filled from the self-populating handler registry (WP6).
 
     ``handlers.load_handlers()`` imports every module in ``microsoft365/handlers/`` and returns
@@ -56,25 +57,14 @@ def _dispatch_table() -> dict[str, Callable[[dict], Any]]:
     holds **every** implemented operation, writes included: the operations this plugin may
     actually execute are decided by :func:`operation_is_executable`, never by membership here.
     """
-    return {key: _host_facing(record) for key, record in load_handlers().items()}
+    return {key: _host_facing(record, settings) for key, record in load_handlers().items()}
 
 
 #: Every implemented operation handler, keyed ``"<service>.<operation>"``, filled from the
 #: handler registry at import time. Every entry is executed through :func:`invoke_handler`,
 #: which is the only place this plugin crosses the sync/async execution seam.
-HANDLER_TABLE: dict[str, Callable[[dict], Any]] = _dispatch_table()
-
-#: The configuration the running dispatch executes under. A host registers this plugin once per
-#: process and the dispatch path is the only writer (:func:`_use_settings`); the default is an
-#: empty configuration, which fails closed if a handler is somehow reached before any dispatch.
-_DISPATCH_SETTINGS: Settings = Settings()
-
-
-def _use_settings(settings: Settings) -> Settings:
-    """Record the configuration a dispatch is running under, for the handler it will invoke."""
-    global _DISPATCH_SETTINGS
-    _DISPATCH_SETTINGS = settings
-    return settings
+HANDLER_TABLE: dict[str, Callable[[dict], Any]] = _dispatch_table(None)
+_DEFAULT_HANDLER_TABLE = dict(HANDLER_TABLE)
 
 
 def invoke_handler(handler, args):
@@ -137,7 +127,13 @@ def operation_is_executable(settings: Settings | None, service: str, operation) 
     return operation in active_actions(settings, service)
 
 
-def service_tool_handler(service: str, args, settings: Settings | None = None):
+def service_tool_handler(
+    service: str,
+    args,
+    settings: Settings | None = None,
+    *,
+    dispatch_table: dict[str, Callable[[dict], Any]] | None = None,
+):
     """Dispatch one service tool call: registered handler, else unavailable (or refused).
 
     Order matters and is part of the contract: the operation is looked up first (so an
@@ -146,13 +142,20 @@ def service_tool_handler(service: str, args, settings: Settings | None = None):
     Nothing else happens before the gate -- no secret, no credential, no client, no request.
     """
     operation = args.get("action") if isinstance(args, dict) else None
-    handler = HANDLER_TABLE.get(f"{service}.{operation}") if isinstance(operation, str) else None
+    if dispatch_table is None:
+        table = _dispatch_table(settings) if settings is not None else HANDLER_TABLE
+    else:
+        table = dispatch_table
+        key = f"{service}.{operation}"
+        # Keep the existing test/host seam: an explicit table entry replaced after
+        # registration is an intentional override, never ambient dispatch state.
+        if key in HANDLER_TABLE and HANDLER_TABLE[key] is not _DEFAULT_HANDLER_TABLE.get(key):
+            table = {**table, key: HANDLER_TABLE[key]}
+    handler = table.get(f"{service}.{operation}") if isinstance(operation, str) else None
     if handler is None:
         return unavailable_handler(args, service=service)
     if not operation_is_executable(settings, service, operation):
         return json.dumps(not_executable_payload(service, operation))
-    if settings is not None:
-        _use_settings(settings)
     try:
         return invoke_handler(handler, args)
     except ExecutionError as exc:
@@ -253,6 +256,7 @@ def register_plugin(ctx) -> None:
     ctx.register_hook("pre_tool_call", pre_tool_call)
     if settings is None:
         return
+    dispatch_table = _dispatch_table(settings)
     for service in OPERATIONS:
         actions = active_actions(settings, service)
         schema = schema_for(service, actions)
@@ -271,7 +275,7 @@ def register_plugin(ctx) -> None:
             # Invariant 15: the settings travel with the call, so the executability gate inside
             # service_tool_handler is re-evaluated against this configuration and these final
             # arguments -- not against the payload an earlier hook saw.
-            return service_tool_handler(_service, args, settings=settings)
+            return service_tool_handler(_service, args, settings=settings, dispatch_table=dispatch_table)
 
         ctx.register_tool(
             name=f"microsoft365_{service}",
