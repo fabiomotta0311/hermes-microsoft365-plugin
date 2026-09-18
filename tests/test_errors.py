@@ -549,6 +549,19 @@ def test_results_bound_strings_break_cycles_and_handle_bytes():
     assert payload["long"].endswith("[TRUNCATED]")
 
 
+def test_results_do_not_render_unknown_model_objects_as_strings():
+    from microsoft365.results import normalize_result
+
+    class HostileModel:
+        def __str__(self):
+            return f"token={SENTINEL} https://{SENTINEL}.invalid/private"
+
+    payload = normalize_result(HostileModel())
+
+    assert payload == {"type": "HostileModel"}
+    assert SENTINEL not in json.dumps(payload)
+
+
 def test_results_recurse_through_model_additional_data_without_leaking():
     from msgraph.generated.models.message import Message
     from microsoft365.results import normalize_result

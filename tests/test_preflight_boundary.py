@@ -76,6 +76,30 @@ def test_preflight_user_requirement_is_derived_from_selected_operation_metadata(
     assert "user_id" not in result["missing"]
 
 
+def test_preflight_selected_status_carries_definition_remote_verification_truth():
+    from microsoft365.contract import OPERATION_REGISTRY, Settings
+    from microsoft365.preflight import build_preflight
+
+    settings = Settings.from_mapping({"capabilities": {"outlook": {"search": True}, "planner": {"read": True}}})
+    result = build_preflight(settings, sdk_available=True)
+
+    assert result["selected_operations"] == ["outlook.search", "planner.read"]
+    for key in result["selected_operations"]:
+        definition = OPERATION_REGISTRY[key]
+        status = result["operation_status"][key]
+        assert status["remote_verification"] == definition.remote_verification
+        assert status["remote_verification_evidence"] == list(definition.remote_verification_evidence)
+
+
+def test_preflight_without_settings_has_no_operation_verification_rows():
+    from microsoft365.preflight import build_preflight
+
+    result = build_preflight(None, sdk_available=True)
+
+    assert result["selected_operations"] == []
+    assert result["operation_status"] == {}
+
+
 def test_divergent_user_is_rejected_before_secret_credential_and_client(monkeypatch):
     import agent.secret_scope
     import azure.identity

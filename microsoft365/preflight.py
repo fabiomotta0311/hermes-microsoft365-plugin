@@ -73,10 +73,18 @@ def build_preflight(
     for key in selected:
         service, operation = key.split(".", 1)
         status = operation_status(settings.authentication_mode, service, operation)
+        definition = OPERATION_REGISTRY[key]
+        remote_verification = getattr(definition, "remote_verification", "not_tested")
+        evidence = getattr(definition, "remote_verification_evidence", ())
+        if remote_verification != "verified" or not evidence:
+            remote_verification = "not_tested"
+            evidence = ()
         statuses[key] = {
             **asdict(status),
-            "permissions": list(OPERATION_REGISTRY[key].permissions),
-            "write": OPERATION_REGISTRY[key].write,
+            "permissions": list(definition.permissions),
+            "write": definition.write,
+            "remote_verification": remote_verification,
+            "remote_verification_evidence": list(evidence),
         }
     requirements = _requirements(settings, selected)
     configured = {

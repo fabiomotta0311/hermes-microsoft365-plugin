@@ -148,6 +148,10 @@ def normalize_result(
                     output[field_name] = recurse(item)
         if hasattr(value, "additional_data"):
             output["additional_data"] = recurse(getattr(value, "additional_data") or {})
-        return output if output else recurse(str(value))
+        if output:
+            return output
+        # Unknown model objects may expose secrets, tokens or URLs through __str__.
+        # Return only a bounded structural marker rather than invoking user code.
+        return {"type": type(value).__name__[:100] or "unknown"}
     finally:
         _seen.discard(identity)
