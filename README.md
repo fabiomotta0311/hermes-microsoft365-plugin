@@ -80,7 +80,7 @@ distribution is installed, `importlib.metadata`.
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues should follow [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). Release evidence and the catalog hand-off boundary are documented in [docs/release.md](docs/release.md). Security issues should follow [SECURITY.md](SECURITY.md).
 
 ## License
 
