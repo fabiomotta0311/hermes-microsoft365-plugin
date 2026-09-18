@@ -1,6 +1,8 @@
 import importlib.metadata as md
+import json
 import tomllib
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import pytest
 import yaml
@@ -17,6 +19,18 @@ def _manifest_version() -> str:
 def _declared_package_version() -> str:
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
     return project["version"]
+
+
+def _installed_distribution_is_this_checkout(distribution: md.Distribution) -> bool:
+    direct_url = distribution.read_text("direct_url.json")
+    if not direct_url:
+        return False
+    try:
+        source_url = json.loads(direct_url)["url"]
+        source_path = Path(unquote(urlparse(source_url).path)).resolve()
+    except (KeyError, TypeError, ValueError):
+        return False
+    return source_path == Path.cwd().resolve()
 
 
 def test_manifest_is_standalone_complete_and_secret_safe():
@@ -125,5 +139,7 @@ def test_manifest_version_matches_installed_distribution_metadata():
         installed = md.version(MANIFEST_DISTRIBUTION)
     except md.PackageNotFoundError:
         pytest.skip(f"{MANIFEST_DISTRIBUTION} is not installed in this environment")
+    if not _installed_distribution_is_this_checkout(installed_distribution := md.distribution(MANIFEST_DISTRIBUTION)):
+        pytest.skip("installed distribution is not linked to this checkout")
 
-    assert _manifest_version() == installed
+    assert _manifest_version() == installed_distribution.version
