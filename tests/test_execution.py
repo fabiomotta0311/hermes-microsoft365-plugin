@@ -311,6 +311,73 @@ def test_service_tool_handler_returns_a_typed_error_and_never_raw_sdk_text(monke
     assert "network transport must not run" not in json.dumps(payload)
 
 
+@pytest.mark.parametrize(
+    "category",
+    ("authentication_required", "permission_denied", "throttled"),
+)
+def test_registered_dispatch_returns_canonical_graph_error_envelope(monkeypatch, category):
+    from microsoft365 import register, registration
+    from microsoft365.errors import GraphError, MESSAGES
+    from tests.test_registration_secrets import RecordingContext
+
+    def handler(args):
+        del args
+        raise GraphError(
+            category,
+            MESSAGES[category],
+            retryable=category == "throttled",
+            retry_after_seconds=2 if category == "throttled" else None,
+        )
+
+    monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.search", handler)
+    monkeypatch.setattr(registration, "active_actions", lambda settings, service: ("search",))
+    ctx = RecordingContext({
+        "tenant_id": "tenant",
+        "client_id": "client",
+        "user_id": "user",
+        "capabilities": {"outlook": {"search": True}},
+    })
+    register(ctx)
+
+    payload = json.loads(ctx.tools["microsoft365_outlook"]["handler"]({"action": "search", "user_id": "user"}))
+
+    assert payload == {
+        "error": category,
+        "message": MESSAGES[category],
+        "retryable": category == "throttled",
+        **({"retry_after_seconds": 2} if category == "throttled" else {}),
+    }
+    assert "traceback" not in json.dumps(payload).lower()
+
+
+def test_registered_dispatch_preserves_execution_error_envelope(monkeypatch):
+    from microsoft365 import register, registration
+    from microsoft365.execution import ExecutionError
+    from microsoft365.errors import MESSAGES
+    from tests.test_registration_secrets import RecordingContext
+
+    def handler(args):
+        del args
+        raise ExecutionError("service_error", MESSAGES["service_error"])
+
+    monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.search", handler)
+    monkeypatch.setattr(registration, "active_actions", lambda settings, service: ("search",))
+    ctx = RecordingContext({
+        "tenant_id": "tenant",
+        "client_id": "client",
+        "user_id": "user",
+        "capabilities": {"outlook": {"search": True}},
+    })
+    register(ctx)
+
+    payload = json.loads(ctx.tools["microsoft365_outlook"]["handler"]({"action": "search", "user_id": "user"}))
+
+    assert payload == {
+        "error": "service_error",
+        "message": str(ExecutionError("service_error", MESSAGES["service_error"])),
+    }
+
+
 def test_async_handler_must_not_nest_the_seam_and_fails_closed(monkeypatch, graph_client):
     from microsoft365 import execution, registration
 

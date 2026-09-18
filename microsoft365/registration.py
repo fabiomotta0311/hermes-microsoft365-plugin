@@ -15,6 +15,7 @@ from .contract import (
     operation_status,
 )
 from .execution import ExecutionError, run_async
+from .errors import GraphError
 from .handlers import HandlerContext, load_handlers
 from .preflight import build_preflight
 from .validation import check as check_operation_arguments
@@ -160,6 +161,8 @@ def service_tool_handler(
         return invoke_handler(handler, args)
     except ExecutionError as exc:
         return json.dumps({"error": exc.category, "message": str(exc)})
+    except GraphError as exc:
+        return json.dumps(exc.to_result())
 
 
 def active_actions(settings: Settings, service: str) -> tuple[str, ...]:
