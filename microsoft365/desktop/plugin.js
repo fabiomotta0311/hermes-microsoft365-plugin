@@ -57,6 +57,34 @@ function useDashboardQuery(ctx, path, guard) {
   });
 }
 
+function canAdvanceFromStep(step, { mode, capabilities, configuration, preflight }) {
+  if (step === 0) {
+    return !capabilities.isLoading
+      && !capabilities.isError
+      && capabilities.data
+      && Array.isArray(capabilities.data.operations)
+      && capabilities.data.operations.length > 0;
+  }
+  if (step === 1) return mode === "application";
+  if (step === 2) return !configuration.isLoading && !configuration.isError && Boolean(configuration.data);
+  if (step === 3) return !preflight.isLoading && !preflight.isError && Boolean(preflight.data) && preflight.data.locally_ready === true;
+  return true;
+}
+
+function blockedStepMessage(step, { mode, capabilities, configuration, preflight }) {
+  if (step === 0 && (capabilities.isLoading || capabilities.isError || !capabilities.data || capabilities.data.operations.length === 0)) {
+    return "Continue bloqueado: aguarde uma lista de capacidades válida e não vazia.";
+  }
+  if (step === 1 && mode !== "application") return "Continue bloqueado: somente o modo Application está disponível nesta versão.";
+  if (step === 2 && (configuration.isLoading || configuration.isError || !configuration.data)) {
+    return "Continue bloqueado: a configuração precisa ser carregada antes de prosseguir.";
+  }
+  if (step === 3 && (preflight.isLoading || preflight.isError || !preflight.data || preflight.data.locally_ready !== true)) {
+    return "Continue bloqueado: a pré-verificação local precisa estar pronta; isto não confirma acesso remoto.";
+  }
+  return null;
+}
+
 function storageName() {
   const profile = host && host.state && host.state.profile;
   const value = profile && typeof profile.get === "function" ? profile.get() : "default";
@@ -203,6 +231,9 @@ function Microsoft365Page({ ctx }) {
   const configuredMode = configuration.data && configuration.data.authentication_mode;
   const capabilityMode = capabilities.data && capabilities.data.authentication_mode;
   const preflightData = preflight.data;
+  const progressionState = { mode: draft.mode, capabilities, configuration, preflight };
+  const canAdvance = canAdvanceFromStep(draft.step, progressionState);
+  const blockedMessage = blockedStepMessage(draft.step, progressionState);
 
   return jsx("main", { style: { maxWidth: "940px", padding: "32px", margin: "0 auto" }, children: [
     jsx("header", { children: [
@@ -213,7 +244,7 @@ function Microsoft365Page({ ctx }) {
       jsx("p", { style: textStyle("14px", "var(--ui-text-secondary)"), children: "Configuração local e segura para revisar capacidades antes de qualquer integração." }),
     ] }),
     jsx("nav", { "aria-label": "Etapas da configuração", style: { display: "flex", gap: "8px", marginTop: "28px", flexWrap: "wrap" }, children: STEPS.map((label, index) => jsx("button", {
-      key: label, type: "button", onClick: () => update({ step: index }),
+      key: label, type: "button", disabled: index > draft.step, onClick: () => update({ step: index }), "aria-current": index === draft.step ? "step" : undefined,
       style: { padding: "8px 10px", border: 0, borderBottom: `2px solid ${index === draft.step ? "var(--ui-accent)" : "var(--ui-stroke-secondary)"}`, background: "transparent", color: index === draft.step ? "var(--ui-text-primary)" : "var(--ui-text-secondary)" },
       children: `${index + 1}. ${label}`,
     })) }),
@@ -243,12 +274,13 @@ function Microsoft365Page({ ctx }) {
       jsx(QueryMessage, { query: preflight, loading: "Executando pré-verificação…", error: "Não foi possível executar a pré-verificação." }),
       preflightData ? jsx("div", { children: [
         jsx("p", { style: textStyle("13px", "var(--ui-text-secondary)"), children: preflightData.locally_ready ? "Pronto para revisão local." : "Revisão local bloqueada até corrigir os requisitos informados pelo dashboard." }),
-        jsx(Badge, { children: `Verificação remota: ${preflightData.remote_verification}` }),
+        jsx(Badge, { children: `Status remoto informado pelo dashboard (não verificado aqui): ${preflightData.remote_verification}` }),
       ] }) : null,
     ] }) }),
+    blockedMessage ? jsx("p", { role: "alert", "aria-live": "polite", style: { ...textStyle("13px", "var(--ui-text-secondary)"), marginTop: "18px" }, children: blockedMessage }) : null,
     jsx("footer", { style: { display: "flex", justifyContent: "space-between", marginTop: "28px" }, children: [
       jsx(Button, { onClick: previous, disabled: draft.step === 0, children: "Voltar" }),
-      jsx(Button, { onClick: next, children: draft.step === STEPS.length - 1 ? "Concluir revisão local" : "Continuar" }),
+      jsx(Button, { onClick: next, disabled: draft.step < STEPS.length - 1 && !canAdvance, children: draft.step === STEPS.length - 1 ? "Concluir revisão local" : "Continuar" }),
     ] }),
   ] });
 }

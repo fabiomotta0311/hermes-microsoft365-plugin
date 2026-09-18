@@ -60,6 +60,33 @@ def test_permission_helper_does_not_render_identifiers_or_claim_approval():
     assert "status.remote_verification" not in helper
 
 
+def test_wizard_has_explicit_progression_gates_for_each_step():
+    source = PLUGIN.read_text(encoding="utf-8")
+    assert "function canAdvanceFromStep" in source
+    assert "capabilities.isLoading" in source
+    assert "capabilities.isError" in source
+    assert "capabilities.data.operations.length > 0" in source
+    assert 'mode === "application"' in source
+    assert "configuration.isLoading" in source
+    assert "configuration.isError" in source
+    assert "configuration.data" in source
+    assert "preflight.isLoading" in source
+    assert "preflight.isError" in source
+    assert "preflight.data.locally_ready === true" in source
+    assert "canAdvanceFromStep(draft.step" in source
+
+
+def test_wizard_navigation_is_honest_and_completion_is_local_only():
+    source = PLUGIN.read_text(encoding="utf-8")
+    assert "disabled: index > draft.step" in source
+    assert "aria-live" in source
+    assert "Concluir revisão local" in source
+    assert "tenant consent" not in source.lower()
+    assert "consentimento do tenant" not in source.lower()
+    assert "sucesso remoto" not in source.lower()
+    assert "success" not in source.lower()
+
+
 def test_permission_helper_preserves_honest_query_states():
     source = PLUGIN.read_text(encoding="utf-8")
     assert "Carregando capacidades…" in source
