@@ -39,6 +39,22 @@ def graph_client():
     return GraphServiceClient(request_adapter=StrictTransportAdapter())
 
 
+class HostileStreamingResponse:
+    """A response whose eager read would defeat the transfer bound."""
+
+    def __init__(self, chunks, *, content_length=None):
+        self.headers = {} if content_length is None else {"Content-Length": str(content_length)}
+        self._chunks = iter(chunks)
+        self.read_called = False
+
+    def read(self, *args, **kwargs):
+        self.read_called = True
+        raise AssertionError("bounded download must not eagerly read the response")
+
+    def iter_bytes(self, *args, **kwargs):
+        yield from self._chunks
+
+
 class RecordingTransferSeam:
     """Records real request artifacts and returns canned authenticated responses.
 
@@ -420,6 +436,28 @@ def test_download_refuses_a_payload_over_the_bound_even_when_metadata_understate
     )
     assert payload["limit_bytes"] == 4
     assert payload["size_bytes"] == 8
+
+
+def test_download_interrupts_a_hostile_stream_before_materializing_it(graph_client):
+    response = HostileStreamingResponse([b"1", b"2", b"3", b"4", b"5", b"6"])
+    seam = seam_for(size=4, content=response)
+    with pytest.raises(files.TransferError) as excinfo:
+        files.download_file(graph_client, drive_id=DRIVE, path="a.txt", execute=seam, limit_bytes=4)
+    payload = assert_transfer_error(excinfo, category="operation_not_implemented", status=files.DOWNLOAD_RANGE_NOT_IMPLEMENTED)
+    assert payload["size_bytes"] == 5
+    assert response.read_called is False
+    assert list(response._chunks) == [b"6"]
+
+
+def test_download_rejects_a_content_length_over_the_bound_before_streaming(graph_client):
+    response = HostileStreamingResponse([b"never-read"], content_length=5)
+    seam = seam_for(size=4, content=response)
+    with pytest.raises(files.TransferError) as excinfo:
+        files.download_file(graph_client, drive_id=DRIVE, path="a.txt", execute=seam, limit_bytes=4)
+    payload = assert_transfer_error(excinfo, category="operation_not_implemented", status=files.DOWNLOAD_RANGE_NOT_IMPLEMENTED)
+    assert payload["size_bytes"] == 5
+    assert response.read_called is False
+    assert list(response._chunks) == [b"never-read"]
 
 
 def test_download_reports_a_declared_size_mismatch(graph_client):

@@ -405,6 +405,91 @@ def _declared_metadata(item: Any) -> tuple[int, str, str | None]:
     return size, mime_type.strip(), name
 
 
+def _response_header(response: Any, name: str) -> Any:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    if hasattr(headers, "get"):
+        value = headers.get(name)
+        if value is not None:
+            return value
+        value = headers.get(name.lower())
+        if value is not None:
+            return value
+    try:
+        for key, value in headers.items():
+            if str(key).lower() == name.lower():
+                return value
+    except AttributeError:
+        pass
+    return None
+
+
+def _stream_response(response: Any, *, limit_bytes: int) -> bytes:
+    """Read a response incrementally, stopping at the first byte over the bound."""
+    declared = _response_header(response, "Content-Length")
+    if declared is not None:
+        try:
+            declared = int(declared)
+        except (TypeError, ValueError):
+            declared = None
+        if declared is not None and declared > limit_bytes:
+            raise TransferError(
+                "operation_not_implemented",
+                status=DOWNLOAD_RANGE_NOT_IMPLEMENTED,
+                limit_bytes=limit_bytes,
+                size_bytes=declared,
+            )
+
+    if isinstance(response, (bytes, bytearray)):
+        if len(response) > limit_bytes:
+            raise TransferError(
+                "operation_not_implemented",
+                status=DOWNLOAD_RANGE_NOT_IMPLEMENTED,
+                limit_bytes=limit_bytes,
+                size_bytes=len(response),
+            )
+        return bytes(response)
+
+    iterator = getattr(response, "iter_bytes", None)
+    if not callable(iterator):
+        iterator = getattr(response, "iter_content", None)
+    chunks = iterator() if callable(iterator) else None
+    data = bytearray()
+    if chunks is not None:
+        for chunk in chunks:
+            if not isinstance(chunk, (bytes, bytearray)):
+                raise TransferError("configuration_error", status=CONTENT_RESPONSE_NOT_BYTES)
+            data.extend(chunk)
+            if len(data) > limit_bytes:
+                raise TransferError(
+                    "operation_not_implemented",
+                    status=DOWNLOAD_RANGE_NOT_IMPLEMENTED,
+                    limit_bytes=limit_bytes,
+                    size_bytes=limit_bytes + 1,
+                )
+        return bytes(data)
+
+    reader = getattr(response, "read", None)
+    if callable(reader):
+        while len(data) <= limit_bytes:
+            chunk = reader(limit_bytes - len(data) + 1)
+            if not chunk:
+                return bytes(data)
+            if not isinstance(chunk, (bytes, bytearray)):
+                raise TransferError("configuration_error", status=CONTENT_RESPONSE_NOT_BYTES)
+            data.extend(chunk)
+            if len(data) > limit_bytes:
+                raise TransferError(
+                    "operation_not_implemented",
+                    status=DOWNLOAD_RANGE_NOT_IMPLEMENTED,
+                    limit_bytes=limit_bytes,
+                    size_bytes=limit_bytes + 1,
+                )
+
+    raise TransferError("configuration_error", status=CONTENT_RESPONSE_NOT_BYTES)
+
+
 def download_file(
     client: Any,
     *,
@@ -455,16 +540,7 @@ def download_file(
         )
 
     payload = execute(_content_builder(client, drive, address), method="GET", adapter=adapter)
-    if not isinstance(payload, (bytes, bytearray)):
-        raise TransferError("configuration_error", status=CONTENT_RESPONSE_NOT_BYTES)
-    data = bytes(payload)
-    if len(data) > bound:
-        raise TransferError(
-            "operation_not_implemented",
-            status=DOWNLOAD_RANGE_NOT_IMPLEMENTED,
-            limit_bytes=bound,
-            size_bytes=len(data),
-        )
+    data = _stream_response(payload, limit_bytes=bound)
     if len(data) != declared_size:
         raise TransferError(
             "precondition_failed", status=DECLARED_SIZE_MISMATCH, size_bytes=len(data)
