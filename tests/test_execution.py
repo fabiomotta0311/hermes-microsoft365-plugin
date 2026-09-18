@@ -381,7 +381,11 @@ def test_registered_dispatch_returns_canonical_graph_error_envelope(monkeypatch,
         )
 
     monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.search", handler)
-    monkeypatch.setattr(registration, "active_actions", lambda settings, service: ("search",))
+    monkeypatch.setattr(
+        registration,
+        "active_actions",
+        lambda settings, service: ("search",) if service == "outlook" else (),
+    )
     ctx = RecordingContext({
         "tenant_id": "tenant",
         "client_id": "client",
@@ -412,7 +416,11 @@ def test_registered_dispatch_preserves_execution_error_envelope(monkeypatch):
         raise ExecutionError("service_error", MESSAGES["service_error"])
 
     monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.search", handler)
-    monkeypatch.setattr(registration, "active_actions", lambda settings, service: ("search",))
+    monkeypatch.setattr(
+        registration,
+        "active_actions",
+        lambda settings, service: ("search",) if service == "outlook" else (),
+    )
     ctx = RecordingContext({
         "tenant_id": "tenant",
         "client_id": "client",
