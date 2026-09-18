@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.0a2] - 2026-09-17
+
+- Refreshed endpoint-level Microsoft Graph permission evidence without promoting any
+  claim to remote verification.
+- Expanded adversarial approval and read-to-write mutation coverage.
+- Added bounded streaming for simple drive downloads.
+
 ## [Unreleased]
 
 - Added release engineering for reproducible wheel builds, isolated install smoke tests,
@@ -18,4 +25,5 @@ All notable changes to this project are documented here.
   #114530, and this pre-release makes no signature, tenant, or production support claim.
 
 [Unreleased]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/compare/main...HEAD
+[0.1.0a2]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a1

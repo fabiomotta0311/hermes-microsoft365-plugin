@@ -1,5 +1,5 @@
 name: microsoft365
-version: 0.1.0a1
+version: 0.1.0a2
 manifest_version: 2
 api_version: 1
 description: "Pre-release Microsoft 365 Graph tools for Hermes"
