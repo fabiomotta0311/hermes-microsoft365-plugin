@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.0a3] - 2026-09-17
+
+- Enforced single-user resource boundaries and redacted preflight identifiers.
+- Added endpoint-derived preflight requirements and Planner-only diagnostics.
+- Added CI quality gates, coverage baseline, support policy, and operational runbooks.
+
 ## [0.1.0a2] - 2026-09-17
 
 - Refreshed endpoint-level Microsoft Graph permission evidence without promoting any
@@ -25,5 +31,6 @@ All notable changes to this project are documented here.
   #114530, and this pre-release makes no signature, tenant, or production support claim.
 
 [Unreleased]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/compare/main...HEAD
+[0.1.0a3]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a3
 [0.1.0a2]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a1
