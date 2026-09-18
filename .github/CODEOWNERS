@@ -1,0 +1,9 @@
+# Default ownership for review and release governance.
+* @fabiomotta0311
+
+# Security-sensitive and release-control paths.
+/SECURITY.md @fabiomotta0311
+/SUPPORT.md @fabiomotta0311
+/.github/ @fabiomotta0311
+/docs/release.md @fabiomotta0311
+/docs/runbooks/ @fabiomotta0311
