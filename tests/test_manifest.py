@@ -23,16 +23,7 @@ def test_manifest_is_standalone_complete_and_secret_safe():
     manifest = yaml.safe_load(Path("microsoft365/plugin.yaml").read_text(encoding="utf-8"))
 
     assert manifest["kind"] == "standalone"
-    assert manifest["provides_tools"] == [
-        "microsoft365_preflight",
-        "microsoft365_outlook",
-        "microsoft365_sharepoint",
-        "microsoft365_onedrive",
-        "microsoft365_calendar",
-        "microsoft365_teams",
-        "microsoft365_todo",
-        "microsoft365_planner",
-    ]
+    assert manifest["provides_tools"] == ["microsoft365_preflight"]
     assert manifest["provides_hooks"] == ["pre_tool_call"]
     assert manifest["requires_env"] == [{
         "name": "MICROSOFT365_CLIENT_SECRET",
@@ -42,6 +33,30 @@ def test_manifest_is_standalone_complete_and_secret_safe():
     }]
     assert "client_secret" not in manifest["config_schema"]
     assert manifest["python_dependencies"][0] == "msgraph-sdk==1.62.0"
+
+
+def test_manifest_tools_match_registration_without_capability_configuration():
+    from microsoft365 import register
+
+    class RecordingContext:
+        def __init__(self):
+            self.config = {}
+            self.tools = set()
+
+        def get_config(self, key, default=None):
+            return self.config.get(key, default)
+
+        def register_tool(self, name, **kwargs):
+            self.tools.add(name)
+
+        def register_hook(self, name, callback):
+            pass
+
+    context = RecordingContext()
+    register(context)
+    manifest = yaml.safe_load(Path("microsoft365/plugin.yaml").read_text(encoding="utf-8"))
+
+    assert context.tools == set(manifest["provides_tools"])
 
 
 def test_declared_versions_agree_with_package_metadata():
