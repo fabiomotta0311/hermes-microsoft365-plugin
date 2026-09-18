@@ -95,6 +95,32 @@ def test_permission_helper_preserves_honest_query_states():
     assert "query.data.operations.length === 0" in source
 
 
+def test_preflight_renders_bounded_local_diagnostic_details_and_ready_state():
+    source = PLUGIN.read_text(encoding="utf-8")
+    for text in (
+        "sanitizePreflightItems", "PreflightDetails", "configuration_errors", "missing",
+        "Requisitos locais informados pelo dashboard", "Requisitos ausentes",
+        "Erros de configuração local", "não comprovam acesso ao tenant Microsoft",
+        "Nenhum requisito local pendente foi informado pelo dashboard",
+    ):
+        assert text in source
+    assert "slice(0, PREFLIGHT_ITEM_LIMIT)" in source
+    assert "data.configuration_errors" in source
+    assert "data.missing" in source
+
+
+def test_preflight_details_do_not_leak_identifiers_exceptions_or_claim_remote_access():
+    source = PLUGIN.read_text(encoding="utf-8")
+    details = source[source.index("function sanitizePreflightItems"):source.index("function Microsoft365Page")]
+    for forbidden in (
+        "tenant_id", "client_id", "user_id", "access_token", "client_secret",
+        "exception", "stack", "OAuth", "Graph", "tenant access",
+    ):
+        assert forbidden.lower() not in details.lower()
+    assert "remote_verification" not in details
+    assert "não verificado" in source
+
+
 def test_desktop_plugin_parses_without_node_dependencies():
     result = subprocess.run(
         ["node", "--check", str(PLUGIN)],

@@ -143,6 +143,36 @@ function safeText(value, fallback = "desconhecido") {
   return value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 240) || fallback;
 }
 
+const PREFLIGHT_ITEM_LIMIT = 8;
+
+function sanitizePreflightItems(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, PREFLIGHT_ITEM_LIMIT)
+    .map((item) => safeText(item, ""))
+    .filter(Boolean);
+}
+
+function PreflightDetails({ data }) {
+  const configurationErrors = sanitizePreflightItems(data.configuration_errors);
+  const missing = sanitizePreflightItems(data.missing);
+  const hasDetails = configurationErrors.length > 0 || missing.length > 0;
+  const list = (title, items) => items.length ? jsx("div", { children: [
+    jsx("strong", { children: title }),
+    jsx("ul", { style: { paddingLeft: "18px", marginTop: "8px" }, children: items.map((item, index) => (
+      jsx("li", { key: `${title}.${index}`, style: textStyle("13px", "var(--ui-text-secondary)"), children: item })
+    )) }),
+  ] }) : null;
+
+  return jsx("div", { style: { marginTop: "14px" }, children: [
+    jsx("strong", { children: "Requisitos locais informados pelo dashboard" }),
+    jsx("p", { style: textStyle("12px", "var(--ui-text-secondary)"), children: "Estes itens são requisitos locais/dashboard e não comprovam acesso ao tenant Microsoft." }),
+    hasDetails ? [
+      list("Erros de configuração local", configurationErrors),
+      list("Requisitos ausentes", missing),
+    ] : jsx("p", { style: textStyle("13px", "var(--ui-text-secondary)"), children: "Nenhum requisito local pendente foi informado pelo dashboard; ambiente local pronto para revisão." }),
+  ] });
+}
+
 function sanitizeCapabilityRow(row, mode) {
   const status = row.status;
   return {
@@ -275,6 +305,7 @@ function Microsoft365Page({ ctx }) {
       preflightData ? jsx("div", { children: [
         jsx("p", { style: textStyle("13px", "var(--ui-text-secondary)"), children: preflightData.locally_ready ? "Pronto para revisão local." : "Revisão local bloqueada até corrigir os requisitos informados pelo dashboard." }),
         jsx(Badge, { children: `Status remoto informado pelo dashboard (não verificado aqui): ${preflightData.remote_verification}` }),
+        jsx(PreflightDetails, { data: preflightData }),
       ] }) : null,
     ] }) }),
     blockedMessage ? jsx("p", { role: "alert", "aria-live": "polite", style: { ...textStyle("13px", "var(--ui-text-secondary)"), marginTop: "18px" }, children: blockedMessage }) : null,
