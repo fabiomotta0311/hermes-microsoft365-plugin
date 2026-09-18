@@ -112,3 +112,17 @@ def test_outer_schema_strictness_preserves_valid_action_specific_properties():
     expected = operation_schema("calendar.create_events")
     assert create_branch["properties"]["subject"] == expected["properties"]["subject"]
     assert "subject" in create_branch["required"]
+    assert "subject" in parameters["properties"]
+
+
+def test_outer_schema_declares_all_branch_properties_when_strict():
+    from microsoft365.registration import schema_for
+
+    parameters = schema_for("calendar", ("create_events", "search"))["parameters"]
+    branch_properties = {
+        property_name
+        for branch in parameters["oneOf"]
+        for property_name in branch["properties"]
+    }
+
+    assert branch_properties <= set(parameters["properties"])

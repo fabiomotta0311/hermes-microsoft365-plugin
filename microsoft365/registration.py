@@ -191,6 +191,13 @@ def schema_for(service: str, actions: tuple[str, ...]):
             branches.append(operation_schema(f"{service}.{action}"))
         except KeyError as exc:
             raise ValueError(f"{service}.{action} has no argument contract") from exc
+    outer_properties = {"action": {"type": "string", "enum": list(actions)}}
+    # ``additionalProperties: false`` applies at this object level in JSON Schema;
+    # declare every branch key here as well, while the oneOf branches remain the
+    # authoritative validators for each action-specific value and requirement.
+    for branch in branches:
+        for property_name in branch["properties"]:
+            outer_properties.setdefault(property_name, {})
     return {
         "name": f"microsoft365_{service}",
         "description": f"Microsoft 365 {service} operations with explicit host approval for writes.",
@@ -199,7 +206,7 @@ def schema_for(service: str, actions: tuple[str, ...]):
             "additionalProperties": False,
             # Keep the aggregate discriminator visible to hosts that inspect the outer object;
             # the oneOf branches remain authoritative for operation-specific properties.
-            "properties": {"action": {"type": "string", "enum": list(actions)}},
+            "properties": outer_properties,
             "required": ["action"],
             "oneOf": branches,
         },
