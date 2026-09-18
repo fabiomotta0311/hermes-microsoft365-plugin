@@ -18,7 +18,7 @@ from .execution import ExecutionError, run_async
 from .errors import GraphError
 from .handlers import HandlerContext, load_handlers
 from .preflight import build_preflight
-from .validation import check as check_operation_arguments
+from .validation import check as check_operation_arguments, operation_schema
 
 
 def _handler_context(settings: Settings | None) -> HandlerContext:
@@ -175,16 +175,32 @@ def active_actions(settings: Settings, service: str) -> tuple[str, ...]:
 
 
 def schema_for(service: str, actions: tuple[str, ...]):
+    """Build the registered model surface from the runtime argument contracts.
+
+    Each branch is discriminated by a single ``action`` value.  Keeping the branches separate
+    is important: a schema that unions all properties permits arguments from one operation to
+    be smuggled into another, while the validator correctly rejects them.
+    """
     if not actions:
         return None
+    branches = []
+    for action in actions:
+        if service not in OPERATIONS or action not in OPERATIONS[service]:
+            raise ValueError(f"{service}.{action} is not a declared operation")
+        try:
+            branches.append(operation_schema(f"{service}.{action}"))
+        except KeyError as exc:
+            raise ValueError(f"{service}.{action} has no argument contract") from exc
     return {
         "name": f"microsoft365_{service}",
         "description": f"Microsoft 365 {service} operations with explicit host approval for writes.",
         "parameters": {
             "type": "object",
+            # Keep the aggregate discriminator visible to hosts that inspect the outer object;
+            # the oneOf branches remain authoritative for operation-specific properties.
             "properties": {"action": {"type": "string", "enum": list(actions)}},
             "required": ["action"],
-            "additionalProperties": True,
+            "oneOf": branches,
         },
     }
 

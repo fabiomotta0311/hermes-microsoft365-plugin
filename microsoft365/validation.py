@@ -1136,14 +1136,14 @@ def _schema_for(spec: ArgumentSpec) -> dict[str, Any]:
     if spec.kind == "boolean":
         return {"type": "boolean"}
     if spec.kind in {"select", "recipients"}:
-        items: dict[str, Any] = {"type": "string"}
+        items: dict[str, Any] = {"type": "string", "maxLength": 64}
         if spec.kind == "recipients":
             items = {
                 "oneOf": [
-                    {"type": "string", "description": "an email address"},
+                    {"type": "string", "maxLength": 318, "description": "an email address"},
                     {
                         "type": "object",
-                        "properties": {"address": {"type": "string"}, "name": {"type": "string"}},
+                        "properties": {"address": {"type": "string", "maxLength": 318}, "name": {"type": "string", "maxLength": MAX_IDENTIFIER_LENGTH}},
                         "required": ["address"],
                         "additionalProperties": False,
                     },
@@ -1158,11 +1158,12 @@ def _schema_for(spec: ArgumentSpec) -> dict[str, Any]:
             "additionalProperties": False,
             "minProperties": 1,
             "properties": {
-                name: _schema_for(ArgumentSpec(name=name, kind=kind)) for name, kind in spec.fields
+                name: _schema_for(_field_spec(name, kind)) for name, kind in spec.fields
             },
             "required": sorted(spec.require_fields),
         }
     schema: dict[str, Any] = {"type": "string", "maxLength": spec.max_length}
     if spec.kind == "timestamp":
+        schema["maxLength"] = _TIMESTAMP_MAX_LENGTH
         schema["description"] = "an ISO-8601 date and time; add time_zone when it has no offset"
     return schema
