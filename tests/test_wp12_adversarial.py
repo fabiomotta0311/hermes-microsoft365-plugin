@@ -172,3 +172,141 @@ def test_payload_validation_precedes_authentication_for_unknown_and_malformed_ca
         result = json.loads(tool(payload))
         assert result["error"] == "validation_error"
     assert calls == []
+
+
+_READ_TO_WRITE_CASES = (
+    ("sharepoint", "download_files", "upload_files"),
+    ("onedrive", "download_files", "upload_files"),
+    ("outlook", "read", "create_draft"),
+    ("outlook", "read", "send"),
+    ("calendar", "search", "create_events"),
+    ("calendar", "search", "update_events"),
+    ("todo", "read", "create_tasks"),
+    ("todo", "read", "update_tasks"),
+    ("planner", "read", "create_tasks"),
+    ("planner", "read", "update_tasks"),
+)
+
+
+def _runtime_probes(monkeypatch):
+    import agent.secret_scope
+    import azure.identity
+    import msgraph
+
+    reached = []
+
+    def forbidden(name):
+        def fail(*args, **kwargs):
+            reached.append(name)
+            raise AssertionError(name)
+
+        return fail
+
+    monkeypatch.setattr(agent.secret_scope, "get_secret", forbidden("secret"))
+    monkeypatch.setattr(azure.identity, "ClientSecretCredential", forbidden("credential"))
+    monkeypatch.setattr(msgraph, "GraphServiceClient", forbidden("client"))
+    return reached
+
+
+@pytest.mark.parametrize("service,read_action,write_action", _READ_TO_WRITE_CASES)
+def test_registered_read_to_write_mutations_remain_non_executable(
+    monkeypatch, service, read_action, write_action
+):
+    """A final-payload mutation cannot turn any registered read into a write."""
+    from microsoft365 import registration
+
+    reached = _runtime_probes(monkeypatch)
+    ctx = _registered()
+    hook = ctx.hooks["pre_tool_call"]
+    read_payload = dict(VALID_PAYLOADS[f"{service}.{read_action}"])
+    write_payload = dict(VALID_PAYLOADS[f"{service}.{write_action}"])
+
+    assert hook(tool_name=f"microsoft365_{service}", args=read_payload) is None
+    # Model the host-owned CORE-1 mutation: retain the approved object identity, but replace
+    # every operation-specific property with a valid destination/write payload.
+    read_payload.clear()
+    read_payload.update(write_payload)
+
+    result = json.loads(ctx.tools[f"microsoft365_{service}"]["handler"](read_payload))
+    assert result["error"] == "operation_not_implemented"
+    assert result["operation"] == write_action
+    assert reached == []
+
+    # The plugin-local dispatch seam independently reaches the same closed result.
+    assert json.loads(
+        registration.service_tool_handler(service, read_payload, settings=_settings())
+    ) == result
+
+
+def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mutations(monkeypatch):
+    """Repeated action, destination, and user-id rewrites never reach client construction."""
+    from microsoft365 import registration
+
+    reached = _runtime_probes(monkeypatch)
+    ctx = _registered()
+    hook = ctx.hooks["pre_tool_call"]
+    payload = dict(VALID_PAYLOADS["outlook.search"])
+    assert hook(tool_name="microsoft365_outlook", args=payload) is None
+
+    # Several modifiers in a loop model chained host middleware. Each final payload is a
+    # complete, validator-approved write, while identifiers deliberately come from a different
+    # destination/user than the originally approved read.
+    mutations = (
+        VALID_PAYLOADS["outlook.send"],
+        VALID_PAYLOADS["calendar.create_events"],
+        VALID_PAYLOADS["todo.update_tasks"],
+        VALID_PAYLOADS["planner.create_tasks"],
+        VALID_PAYLOADS["onedrive.upload_files"],
+    )
+    for candidate in mutations:
+        # The destination is selected from the payload itself; dispatch must not trust the
+        # tool name or any stale approval associated with the original Outlook read.
+        service_name = {
+            "send": "outlook", "create_events": "calendar", "update_tasks": "todo",
+            "create_tasks": "planner", "upload_files": "onedrive",
+        }[candidate["action"]]
+        payload.clear()
+        payload.update(candidate)
+        result = json.loads(ctx.tools[f"microsoft365_{service_name}"]["handler"](payload))
+        assert result["error"] == "operation_not_implemented"
+        assert result["operation"] == candidate["action"]
+    assert reached == []
+
+
+def test_malformed_or_host_owned_approval_directives_are_never_emitted_by_plugin(monkeypatch):
+    """Plugin directives are either exact approvals or exact blocks; CORE-1/CORE-2 are host-owned."""
+    from microsoft365 import registration
+
+    def simulated_active_actions(settings, service):
+        return tuple(settings.selected(service))
+
+    monkeypatch.setattr(registration, "active_actions", simulated_active_actions)
+    ctx = _registered(capabilities={"outlook": {"send": True}})
+    hook = ctx.hooks["pre_tool_call"]
+    cases = (
+        {"action": "send", "user_id": USER, "message_id": "message", "save_to_sent_items": "false"},
+        {"action": "send", "user_id": USER, "message_id": "message", "unexpected": True},
+        {"action": "send", "user_id": USER},
+        {"action": "send", "user_id": USER, "message_id": "message"},
+    )
+    for payload in cases:
+        directive = hook(tool_name="microsoft365_outlook", args=payload)
+        assert directive is not None
+        if directive["action"] == "approve":
+            assert directive == {
+                "action": "approve",
+                "message": "Microsoft 365 send: external side effect",
+                "rule_key": "microsoft365.outlook.send",
+            }
+        else:
+            assert directive["action"] == "block"
+            assert set(directive) == {"action", "message"}
+            assert "rule_key" not in directive
+
+    # A host that rewrites arguments after an approval is outside plugin control; the plugin
+    # still emits no malformed directive and dispatch remains fail-closed.
+    assert hook(tool_name="microsoft365_outlook", args=VALID_PAYLOADS["outlook.send"]) == {
+        "action": "approve",
+        "message": "Microsoft 365 send: external side effect",
+        "rule_key": "microsoft365.outlook.send",
+    }
