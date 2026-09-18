@@ -65,6 +65,7 @@ def test_permission_helper_preserves_honest_query_states():
     assert "Carregando capacidades…" in source
     assert "Não foi possível carregar as capacidades." in source
     assert "Nenhuma capacidade foi publicada pelo dashboard." in source
+    assert "query.data.operations.length === 0" in source
 
 
 def test_desktop_plugin_parses_without_node_dependencies():

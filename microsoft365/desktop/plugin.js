@@ -97,7 +97,7 @@ function Section({ title, children }) {
 function QueryMessage({ query, loading, empty, error }) {
   if (query.isLoading) return jsx("p", { style: textStyle("13px", "var(--ui-text-secondary)"), children: loading });
   if (query.isError) return jsx("p", { role: "alert", style: textStyle("13px", "var(--ui-text-secondary)"), children: error });
-  if (empty) return jsx("p", { style: textStyle("13px", "var(--ui-text-secondary)"), children: empty });
+  if (empty && query.data && Array.isArray(query.data.operations) && query.data.operations.length === 0) return jsx("p", { style: textStyle("13px", "var(--ui-text-secondary)"), children: empty });
   return null;
 }
 
