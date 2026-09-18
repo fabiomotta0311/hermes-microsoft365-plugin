@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [0.1.0a4] - 2026-09-17
+
+- Added sanitized GraphError envelopes at registered dispatch.
+- Added bounded retry for idempotent reads only; writes remain single-attempt.
+- Exposed strict discriminated operation schemas with runtime-matching limits.
+
 ## [0.1.0a3] - 2026-09-17
 
 - Enforced single-user resource boundaries and redacted preflight identifiers.
@@ -31,6 +37,7 @@ All notable changes to this project are documented here.
   #114530, and this pre-release makes no signature, tenant, or production support claim.
 
 [Unreleased]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/compare/main...HEAD
+[0.1.0a4]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a4
 [0.1.0a3]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a3
 [0.1.0a2]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/fabiomotta0311/hermes-microsoft365-plugin/releases/tag/v0.1.0a1

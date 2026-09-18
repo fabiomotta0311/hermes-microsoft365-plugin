@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-microsoft365-plugin"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Pre-release native Hermes plugin for bounded Microsoft 365 Graph operations"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
