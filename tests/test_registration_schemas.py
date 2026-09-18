@@ -94,5 +94,21 @@ def test_registered_tool_surface_uses_the_strict_action_schema():
     for service in SERVICES:
         schema = context.schemas[f"microsoft365_{service}"]
         assert "oneOf" in schema["parameters"]
-        assert "additionalProperties" not in schema["parameters"]
+        assert schema["parameters"]["additionalProperties"] is False
         assert all(branch["additionalProperties"] is False for branch in schema["parameters"]["oneOf"])
+
+
+def test_outer_schema_strictness_preserves_valid_action_specific_properties():
+    from microsoft365.registration import schema_for
+    from microsoft365.validation import operation_schema
+
+    schema = schema_for("calendar", ("create_events", "search"))
+    parameters = schema["parameters"]
+
+    assert parameters["additionalProperties"] is False
+    create_branch = next(
+        branch for branch in parameters["oneOf"] if branch["properties"]["action"]["enum"] == ["create_events"]
+    )
+    expected = operation_schema("calendar.create_events")
+    assert create_branch["properties"]["subject"] == expected["properties"]["subject"]
+    assert "subject" in create_branch["required"]

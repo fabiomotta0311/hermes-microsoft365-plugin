@@ -196,6 +196,7 @@ def schema_for(service: str, actions: tuple[str, ...]):
         "description": f"Microsoft 365 {service} operations with explicit host approval for writes.",
         "parameters": {
             "type": "object",
+            "additionalProperties": False,
             # Keep the aggregate discriminator visible to hosts that inspect the outer object;
             # the oneOf branches remain authoritative for operation-specific properties.
             "properties": {"action": {"type": "string", "enum": list(actions)}},
