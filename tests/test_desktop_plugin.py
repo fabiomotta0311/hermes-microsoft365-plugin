@@ -30,6 +30,43 @@ def test_desktop_shell_uses_sanitized_dashboard_queries_and_is_registered():
     assert "client_secret" not in source
 
 
+def test_permission_helper_renders_truthful_sanitized_capability_details():
+    source = PLUGIN.read_text(encoding="utf-8")
+    for text in (
+        "sanitizeCapabilityRow", "CapabilityHelper", 'jsx("details",', 'jsx("summary",',
+        "Permissões exatas", "Modo configurado", "Executável", "Status de autenticação",
+        "Status de implementação", "capabilityChecklist", "readOnly: true", "textarea",
+    ):
+        assert text in source
+    assert "escrita retida; não habilitada" in source
+    assert "não confirma consentimento administrativo" in source
+    assert "row.permissions" in source
+    assert "row.service" in source
+    assert "row.operation" in source
+    assert "row.write" in source
+    assert "row.status" in source
+
+
+def test_permission_helper_does_not_render_identifiers_or_claim_approval():
+    source = PLUGIN.read_text(encoding="utf-8")
+    helper = source[source.index("function sanitizeCapabilityRow"):source.index("function Microsoft365Page")]
+    for forbidden in (
+        "tenant_id", "client_id", "user_id", "access_token", "client_secret",
+        "admin-consent", "admin consent", "aprovação concluída", "consentimento concedido",
+        "OAuth", "Graph call",
+    ):
+        assert forbidden.lower() not in helper.lower()
+    assert "item.key" not in helper
+    assert "status.remote_verification" not in helper
+
+
+def test_permission_helper_preserves_honest_query_states():
+    source = PLUGIN.read_text(encoding="utf-8")
+    assert "Carregando capacidades…" in source
+    assert "Não foi possível carregar as capacidades." in source
+    assert "Nenhuma capacidade foi publicada pelo dashboard." in source
+
+
 def test_desktop_plugin_parses_without_node_dependencies():
     result = subprocess.run(
         ["node", "--check", str(PLUGIN)],

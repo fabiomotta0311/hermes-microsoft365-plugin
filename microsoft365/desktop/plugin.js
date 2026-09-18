@@ -110,6 +110,68 @@ function groupCapabilities(operations) {
   }, []);
 }
 
+function safeText(value, fallback = "desconhecido") {
+  if (typeof value !== "string") return fallback;
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 240) || fallback;
+}
+
+function sanitizeCapabilityRow(row, mode) {
+  const status = row.status;
+  return {
+    service: safeText(row.service),
+    operation: safeText(row.operation),
+    permissions: row.permissions.map((permission) => safeText(permission, "")).filter(Boolean),
+    mode: mode === "delegated" ? "delegated" : "application",
+    write: row.write === true,
+    authStatus: safeText(status.auth_status),
+    implementationStatus: safeText(status.implementation_status),
+    executable: status.executable === true,
+    reason: safeText(status.reason),
+  };
+}
+
+function capabilityStatusText(row) {
+  if (row.write && !row.executable) return "Não habilitada: escrita retida e não executável.";
+  if (row.executable) return "Executável conforme o status informado pelo dashboard; isto não confirma consentimento administrativo.";
+  return `Não executável: ${row.reason}.`;
+}
+
+function capabilityChecklist(row) {
+  const permissions = row.permissions.length ? row.permissions.join(", ") : "nenhuma permissão listada";
+  return [
+    `Serviço: ${row.service}`,
+    `Operação: ${row.operation}`,
+    `Permissões: ${permissions}`,
+    `Modo de autenticação: ${row.mode}`,
+    `Escrita: ${row.write ? "sim (retida; não habilitada)" : "não"}`,
+    `Executável: ${row.executable ? "sim" : "não"}`,
+    `Status de autenticação: ${row.authStatus}`,
+    `Status de implementação: ${row.implementationStatus}`,
+    `Motivo: ${row.reason}`,
+  ].join("\n");
+}
+
+function CapabilityHelper({ item, mode }) {
+  const row = sanitizeCapabilityRow(item, mode);
+  return jsx("details", {
+    style: { marginTop: "10px", paddingTop: "10px", borderTop: "1px solid var(--ui-stroke-secondary)" },
+    children: [
+      jsx("summary", { style: { cursor: "pointer", fontWeight: 600 }, children: "Ver permissões e checklist" }),
+      jsx("div", { style: { paddingTop: "10px" }, children: [
+        jsx("p", { style: textStyle("13px"), children: `Modo configurado: ${row.mode}` }),
+        jsx("p", { style: textStyle("13px"), children: `Executável: ${row.executable ? "sim" : "não"}` }),
+        jsx("p", { style: textStyle("13px"), children: capabilityStatusText(row) }),
+        jsx("p", { style: textStyle("12px", "var(--ui-text-secondary)"), children: `Status de autenticação: ${row.authStatus} · implementação: ${row.implementationStatus}` }),
+        jsx("p", { style: textStyle("13px"), children: `Permissões exatas: ${row.permissions.length ? row.permissions.join(", ") : "nenhuma"}` }),
+        jsx("label", { style: { display: "block", ...textStyle("12px", "var(--ui-text-secondary)") }, children: [
+          "Checklist copiável",
+          jsx("textarea", { readOnly: true, rows: 9, value: capabilityChecklist(row), "aria-label": `Checklist de permissões para ${row.service} ${row.operation}`, style: { display: "block", width: "100%", marginTop: "6px", resize: "vertical", fontFamily: "inherit" } }),
+        ] }),
+      ] }),
+    ],
+  });
+}
+
 function Microsoft365Page({ ctx }) {
   const [draft, setDraft] = useState(INITIAL_DRAFT);
   const [loaded, setLoaded] = useState(false);
@@ -139,6 +201,7 @@ function Microsoft365Page({ ctx }) {
   const capabilityRows = capabilities.data ? capabilities.data.operations : [];
   const capabilityGroups = groupCapabilities(capabilityRows);
   const configuredMode = configuration.data && configuration.data.authentication_mode;
+  const capabilityMode = capabilities.data && capabilities.data.authentication_mode;
   const preflightData = preflight.data;
 
   return jsx("main", { style: { maxWidth: "940px", padding: "32px", margin: "0 auto" }, children: [
@@ -168,7 +231,10 @@ function Microsoft365Page({ ctx }) {
       jsx(QueryMessage, { query: capabilities, loading: "Carregando capacidades…", error: "Não foi possível carregar as capacidades.", empty: "Nenhuma capacidade foi publicada pelo dashboard." }),
       capabilityGroups.length ? jsx("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "12px" }, children: capabilityGroups.map((group) => jsx("div", { key: group.service, style: { padding: "14px", border: "1px solid var(--ui-stroke-secondary)", borderRadius: "8px" }, children: [
         jsx("strong", { children: group.service }),
-        jsx("ul", { style: { paddingLeft: "18px", marginBottom: 0 }, children: group.items.map((item) => jsx("li", { key: `${item.service}.${item.operation}`, style: textStyle("13px", "var(--ui-text-secondary)"), children: `${item.operation}${item.write ? " (escrita)" : ""} — ${item.status.reason}` })) }),
+        jsx("ul", { style: { paddingLeft: "18px", marginBottom: 0 }, children: group.items.map((item) => jsx("li", { key: `${item.service}.${item.operation}`, style: textStyle("13px", "var(--ui-text-secondary)"), children: [
+          `${item.operation}${item.write ? " (escrita retida; não habilitada)" : ""} — ${item.status.reason}`,
+          jsx(CapabilityHelper, { item, mode: capabilityMode }),
+        ] })) }),
       ] })) }) : null,
     ] }),
     jsx(Section, { title: "Pré-verificação local", children: jsx("div", { style: { padding: "16px", border: "1px solid var(--ui-stroke-secondary)", borderRadius: "10px" }, children: [
