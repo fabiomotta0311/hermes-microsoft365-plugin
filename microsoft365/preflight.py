@@ -20,6 +20,17 @@ def _secret_presence() -> tuple[bool, str | None]:
         return False, type(exc).__name__
 
 
+def _requirements(settings: Settings, selected: list[str]) -> dict[str, bool]:
+    """Derive identity requirements from the selected operation registry rows."""
+    definitions = [OPERATION_REGISTRY[key] for key in selected]
+    application = settings.authentication_mode == "application"
+    return {
+        "tenant_id": application and bool(selected),
+        "client_id": application and bool(selected),
+        "user_id": any("user_id" in definition.required_identifiers for definition in definitions),
+    }
+
+
 def build_preflight(
     settings: Settings | None,
     *,
@@ -34,18 +45,24 @@ def build_preflight(
             sdk_available = True
         except ImportError:
             sdk_available = False
-    secret_present, secret_error = _secret_presence()
     if settings is None:
         return {
             "locally_ready": False,
             "configuration_errors": errors,
-            "secret_present": secret_present,
-            "secret_scope_error": secret_error,
+            "secret_present": None,
+            "secret_scope_error": None,
             "remote_verification": "not_tested",
             "selected_operations": [],
             "operation_status": {},
             "configuration": {},
+            "requirements": {"tenant_id": False, "client_id": False, "user_id": False},
         }
+
+    application_mode = settings.authentication_mode == "application"
+    secret_present: bool | None = None
+    secret_error: str | None = None
+    if application_mode:
+        secret_present, secret_error = _secret_presence()
 
     selected = sorted(
         f"{service}.{operation}"
@@ -61,18 +78,17 @@ def build_preflight(
             "permissions": list(OPERATION_REGISTRY[key].permissions),
             "write": OPERATION_REGISTRY[key].write,
         }
-    missing = [
-        name
-        for name, present in (
-            ("tenant_id", bool(settings.tenant_id.strip())),
-            ("client_id", bool(settings.client_id.strip())),
-            (SECRET_ENV_NAME, secret_present),
-            ("capabilities", bool(selected)),
-        )
-        if not present
-    ]
-    if any(service != "sharepoint" for service, _ in (item.split(".", 1) for item in selected)) and not settings.user_id.strip():
-        missing.append("user_id")
+    requirements = _requirements(settings, selected)
+    configured = {
+        "tenant_id": bool(settings.tenant_id.strip()),
+        "client_id": bool(settings.client_id.strip()),
+        "user_id": bool(settings.user_id.strip()),
+    }
+    missing = [name for name, required in requirements.items() if required and not configured[name]]
+    if selected and application_mode and not secret_present:
+        missing.append(SECRET_ENV_NAME)
+    if not selected:
+        missing.append("capabilities")
     all_executable = bool(selected) and all(item["executable"] for item in statuses.values())
     return {
         "locally_ready": bool(sdk_available and not errors and not missing and all_executable),
@@ -86,10 +102,11 @@ def build_preflight(
         "selected_operations": selected,
         "operation_status": statuses,
         "configuration": {
-            "tenant_id": settings.tenant_id,
-            "client_id": settings.client_id,
-            "user_id": settings.user_id,
+            "tenant_id_configured": configured["tenant_id"],
+            "client_id_configured": configured["client_id"],
+            "user_id_configured": configured["user_id"],
             "authentication_mode": settings.authentication_mode,
             "capabilities": {key: dict(value) for key, value in settings.capabilities.items()},
         },
+        "requirements": requirements,
     }
