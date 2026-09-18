@@ -123,7 +123,7 @@ SAMPLE_IDENTIFIERS = {"user_id": "user", "todo_list_id": "list", "todo_task_id":
 EXPECTED_ENDPOINTS = (
     (
         "todo.list_task_lists", "GET", "/users/{user_id}/todo/lists", "user", ("user_id",),
-        ("Tasks.Read.All",), (), "build_collection_request_information", "todo_lists", "",
+        ("Tasks.Read.All",), (), "build_collection_request_information", "todo_lists", "https://learn.microsoft.com/en-us/graph/api/todo-list-lists",
     ),
     (
         "todo.search", "GET", "/users/{user_id}/todo/lists/{todo_list_id}/tasks", "list",
@@ -134,18 +134,18 @@ EXPECTED_ENDPOINTS = (
     (
         "todo.read", "GET", "/users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}",
         "task", ("user_id", "todo_list_id", "todo_task_id"), ("Tasks.Read.All",), (),
-        "build_item_request_information", "todo_read", "",
+        "build_item_request_information", "todo_read", "https://learn.microsoft.com/en-us/graph/api/todotask-get",
     ),
     (
         "todo.create_tasks", "POST", "/users/{user_id}/todo/lists/{todo_list_id}/tasks", "list",
         ("user_id", "todo_list_id"), ("Tasks.ReadWrite.All",), (),
-        "build_write_request_information", "todo_create_tasks", "",
+        "build_write_request_information", "todo_create_tasks", "https://learn.microsoft.com/en-us/graph/api/todotasklist-post-tasks",
     ),
     (
         "todo.update_tasks", "PATCH",
         "/users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}", "task",
         ("user_id", "todo_list_id", "todo_task_id"), ("Tasks.ReadWrite.All",), (),
-        "build_write_request_information", "todo_update_tasks", "",
+        "build_write_request_information", "todo_update_tasks", "https://learn.microsoft.com/en-us/graph/api/todotask-update",
     ),
 )
 

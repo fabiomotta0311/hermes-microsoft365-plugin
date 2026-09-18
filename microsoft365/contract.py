@@ -227,6 +227,7 @@ PLANNER_ENDPOINTS: tuple[PlannerEndpoint, ...] = (
         application_permissions=("Tasks.Read.All",),
         contract_call="build_collection_request_information",
         contract_case="planner_plans",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/planner-list-plans",
     ),
     PlannerEndpoint(
         operation="list_plans",
@@ -237,6 +238,7 @@ PLANNER_ENDPOINTS: tuple[PlannerEndpoint, ...] = (
         application_permissions=("Tasks.Read.All",),
         contract_call="build_collection_request_information",
         contract_case="planner_plans",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/planner-list-plans",
     ),
     PlannerEndpoint(
         operation="list_buckets",
@@ -247,6 +249,7 @@ PLANNER_ENDPOINTS: tuple[PlannerEndpoint, ...] = (
         application_permissions=("Tasks.Read.All",),
         contract_call="build_collection_request_information",
         contract_case="planner_buckets",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/planner-list-buckets",
     ),
     PlannerEndpoint(
         operation="list_tasks",
@@ -268,6 +271,7 @@ PLANNER_ENDPOINTS: tuple[PlannerEndpoint, ...] = (
         application_permissions=("Tasks.Read.All",),
         contract_call="build_item_request_information",
         contract_case="planner_read",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/plannertask-get",
     ),
     PlannerEndpoint(
         operation="create_tasks",
@@ -417,6 +421,7 @@ TODO_ENDPOINTS: tuple[TodoEndpoint, ...] = (
         application_permissions=("Tasks.Read.All",),
         contract_call="build_collection_request_information",
         contract_case="todo_lists",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/todo-list-lists",
     ),
     TodoEndpoint(
         operation="search",
@@ -438,6 +443,7 @@ TODO_ENDPOINTS: tuple[TodoEndpoint, ...] = (
         application_permissions=("Tasks.Read.All",),
         contract_call="build_item_request_information",
         contract_case="todo_read",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/todotask-get",
     ),
     TodoEndpoint(
         operation="create_tasks",
@@ -448,6 +454,7 @@ TODO_ENDPOINTS: tuple[TodoEndpoint, ...] = (
         application_permissions=("Tasks.ReadWrite.All",),
         contract_call="build_write_request_information",
         contract_case="todo_create_tasks",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/todotasklist-post-tasks",
     ),
     TodoEndpoint(
         operation="update_tasks",
@@ -458,6 +465,7 @@ TODO_ENDPOINTS: tuple[TodoEndpoint, ...] = (
         application_permissions=("Tasks.ReadWrite.All",),
         contract_call="build_write_request_information",
         contract_case="todo_update_tasks",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/todotask-update",
     ),
 )
 
@@ -715,6 +723,7 @@ OUTLOOK_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Mail.Read",),
         contract_call="build_collection_request_information",
         contract_case="outlook_messages",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/user-list-messages",
     ),
     MessagingEndpoint(
         service="outlook",
@@ -726,6 +735,7 @@ OUTLOOK_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Mail.Read",),
         contract_call="build_item_request_information",
         contract_case="outlook_read",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/message-get",
     ),
     MessagingEndpoint(
         service="outlook",
@@ -737,6 +747,7 @@ OUTLOOK_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Mail.ReadWrite",),
         contract_call="build_write_request_information",
         contract_case="outlook_create_draft",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/user-post-messages",
     ),
     MessagingEndpoint(
         service="outlook",
@@ -748,6 +759,7 @@ OUTLOOK_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Mail.Send",),
         contract_call="build_write_request_information",
         contract_case="outlook_send",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/user-sendmail",
     ),
     MessagingEndpoint(
         service="outlook",
@@ -759,6 +771,7 @@ OUTLOOK_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Mail.Send",),
         contract_call="build_write_request_information",
         contract_case="outlook_send_existing",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/message-send",
     ),
 )
 
@@ -773,6 +786,7 @@ CALENDAR_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Calendars.Read",),
         contract_call="build_collection_request_information",
         contract_case="calendar_events",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/user-list-events",
     ),
     MessagingEndpoint(
         service="calendar",
@@ -784,6 +798,7 @@ CALENDAR_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Calendars.ReadWrite",),
         contract_call="build_write_request_information",
         contract_case="calendar_create_events",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/user-post-events",
     ),
     MessagingEndpoint(
         service="calendar",
@@ -798,6 +813,7 @@ CALENDAR_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         # A conditional update: the handler refuses a call without an ETag, so the endpoint
         # itself declares the header it cannot run without.
         required_headers=("If-Match",),
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/event-update",
     ),
 )
 
@@ -916,6 +932,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Sites.Read.All",),
         contract_call="build_search_request_information",
         contract_case="sites_search",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/site-list",
     ),
     DriveEndpoint(
         service="sharepoint",
@@ -927,6 +944,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Sites.Read.All",),
         contract_call="build_search_request_information",
         contract_case="drive_search",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/driveitem-search",
     ),
     DriveEndpoint(
         service="sharepoint",
@@ -936,6 +954,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         container="site",
         path_identifiers=("site_id",),
         application_permissions=("Sites.Read.All",),
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/site-get",
     ),
     DriveEndpoint(
         service="sharepoint",
@@ -947,6 +966,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Sites.Read.All",),
         contract_call="build_item_request_information",
         contract_case="drive_item_read",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/driveitem-get",
     ),
     DriveEndpoint(
         service="sharepoint",
@@ -958,6 +978,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Files.Read.All",),
         contract_call="build_content_request_information",
         contract_case="download_files",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/driveitem-get-content",
     ),
     DriveEndpoint(
         service="sharepoint",
@@ -969,6 +990,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Files.ReadWrite.All",),
         contract_call="build_content_request_information",
         contract_case="upload_files",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/driveitem-put-content",
     ),
     DriveEndpoint(
         service="onedrive",
@@ -980,6 +1002,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Files.Read.All",),
         contract_call="build_search_request_information",
         contract_case="drive_search",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/driveitem-search",
     ),
     DriveEndpoint(
         service="onedrive",
@@ -991,6 +1014,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Files.Read.All",),
         contract_call="build_item_request_information",
         contract_case="drive_item_read",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/driveitem-get",
     ),
     DriveEndpoint(
         service="onedrive",
@@ -1002,6 +1026,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Files.Read.All",),
         contract_call="build_content_request_information",
         contract_case="download_files",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/driveitem-get-content",
     ),
     DriveEndpoint(
         service="onedrive",
@@ -1013,6 +1038,7 @@ DRIVE_ENDPOINTS: tuple[DriveEndpoint, ...] = (
         application_permissions=("Files.ReadWrite.All",),
         contract_call="build_content_request_information",
         contract_case="upload_files",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/driveitem-put-content",
     ),
 )
 
@@ -1050,6 +1076,7 @@ TEAMS_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Team.ReadBasic.All",),
         contract_call="build_collection_request_information",
         contract_case="teams_joined",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/user-list-joinedteams",
     ),
     MessagingEndpoint(
         service="teams",
@@ -1061,6 +1088,7 @@ TEAMS_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         application_permissions=("Channel.ReadBasic.All",),
         contract_call="build_collection_request_information",
         contract_case="teams_channels",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/channel-list",
     ),
     MessagingEndpoint(
         service="teams",
@@ -1069,6 +1097,7 @@ TEAMS_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         path_template="/search/query",
         container="search",
         contract_case="teams_search_messages",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/search-query",
         contract_call="build_write_request_information",
     ),
     MessagingEndpoint(
@@ -1079,6 +1108,7 @@ TEAMS_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         container="channel",
         path_identifiers=("team_id", "channel_id"),
         contract_case="teams_send_messages",
+        documentation_page="https://learn.microsoft.com/en-us/graph/api/channel-post-messages",
         contract_call="build_write_request_information",
     ),
 )

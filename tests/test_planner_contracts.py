@@ -119,17 +119,17 @@ SAMPLE_IDENTIFIERS = {"group_id": "group", "plan_id": "plan", "planner_task_id":
 EXPECTED_ENDPOINTS = (
     (
         "planner.list_plans", "GET", "/planner/plans", "tenant_or_group", (), (),
-        ("Tasks.Read.All",), (), "build_collection_request_information", "planner_plans", "",
+        ("Tasks.Read.All",), (), "build_collection_request_information", "planner_plans", "https://learn.microsoft.com/en-us/graph/api/planner-list-plans",
     ),
     (
         "planner.list_plans", "GET", "/groups/{group_id}/planner/plans", "tenant_or_group",
         ("group_id",), (), ("Tasks.Read.All",), (), "build_collection_request_information",
-        "planner_plans", "",
+        "planner_plans", "https://learn.microsoft.com/en-us/graph/api/planner-list-plans",
     ),
     (
         "planner.list_buckets", "GET", "/planner/plans/{plan_id}/buckets", "plan",
         ("plan_id",), (), ("Tasks.Read.All",), (), "build_collection_request_information",
-        "planner_buckets", "",
+        "planner_buckets", "https://learn.microsoft.com/en-us/graph/api/planner-list-buckets",
     ),
     (
         "planner.list_tasks", "GET", "/planner/plans/{plan_id}/tasks", "plan", ("plan_id",), (),
@@ -139,7 +139,7 @@ EXPECTED_ENDPOINTS = (
     (
         "planner.read", "GET", "/planner/tasks/{planner_task_id}", "task",
         ("planner_task_id",), (), ("Tasks.Read.All",), (), "build_item_request_information",
-        "planner_read", "",
+        "planner_read", "https://learn.microsoft.com/en-us/graph/api/plannertask-get",
     ),
     (
         "planner.create_tasks", "POST", "/planner/tasks", "plan_and_bucket", (),

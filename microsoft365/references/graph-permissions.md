@@ -28,11 +28,11 @@ headers from those endpoints, so a claim cannot drift from the endpoint it belon
 
 | Operation | Endpoint | Application role | Permission claim | Implementation status | Recorded endpoint reference |
 |---|---|---|---|---|---|
-| `planner.list_plans` | `GET /planner/plans` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
-| `planner.list_plans` | `GET /groups/{group_id}/planner/plans` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
-| `planner.list_buckets` | `GET /planner/plans/{plan_id}/buckets` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `planner.list_plans` | `GET /planner/plans` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/planner-list-plans |
+| `planner.list_plans` | `GET /groups/{group_id}/planner/plans` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/planner-list-plans |
+| `planner.list_buckets` | `GET /planner/plans/{plan_id}/buckets` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/planner-list-buckets |
 | `planner.list_tasks` | `GET /planner/plans/{plan_id}/tasks` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/plannerplan-list-tasks |
-| `planner.read` | `GET /planner/tasks/{planner_task_id}` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `planner.read` | `GET /planner/tasks/{planner_task_id}` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/plannertask-get |
 | `planner.create_tasks` | `POST /planner/tasks` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/planner-post-tasks |
 | `planner.update_tasks` | `PATCH /planner/tasks/{planner_task_id}` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/plannertask-update |
 
@@ -86,11 +86,11 @@ and the registry disagree.
 
 | Operation | Endpoint | Application role | Permission claim | Implementation status | Recorded endpoint reference |
 |---|---|---|---|---|---|
-| `todo.list_task_lists` | `GET /users/{user_id}/todo/lists` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
+| `todo.list_task_lists` | `GET /users/{user_id}/todo/lists` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/todo-list-lists |
 | `todo.search` | `GET /users/{user_id}/todo/lists/{todo_list_id}/tasks` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/todotasklist-list-tasks |
-| `todo.read` | `GET /users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | not recorded |
-| `todo.create_tasks` | `POST /users/{user_id}/todo/lists/{todo_list_id}/tasks` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | not recorded |
-| `todo.update_tasks` | `PATCH /users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | not recorded |
+| `todo.read` | `GET /users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}` | `Tasks.Read.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/todotask-get |
+| `todo.create_tasks` | `POST /users/{user_id}/todo/lists/{todo_list_id}/tasks` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/todotasklist-post-tasks |
+| `todo.update_tasks` | `PATCH /users/{user_id}/todo/lists/{todo_list_id}/tasks/{todo_task_id}` | `Tasks.ReadWrite.All` | `documented_not_verified` | `implemented` | https://learn.microsoft.com/en-us/graph/api/todotask-update |
 
 The `sdk_contract` case of each row, in the same order, is `todo_lists`, `todo_tasks`, `todo_read`,
 `todo_create_tasks` and `todo_update_tasks`. Only the task listing carries a recorded reference; the
@@ -151,3 +151,47 @@ Official endpoint references:
 - https://learn.microsoft.com/en-us/graph/api/planner-post-tasks
 - https://learn.microsoft.com/en-us/graph/api/plannertask-update
 - https://learn.microsoft.com/en-us/graph/api/plannerplan-list-tasks
+
+## WP-D static evidence refresh
+
+The endpoint rows above and the index below were recomputed against official Microsoft Graph endpoint pages. Static documentation is not tenant or token evidence: every permission claim remains `documented_not_verified`, remote verification remains `not_tested`, and no Graph call was made.
+
+| Operation | Application role(s) | Delegated scope(s) | Application mode | Delegated mode | Official endpoint documentation |
+|---|---|---|---|---|---|
+| `teams.list_teams` | `Team.ReadBasic.All` | `Team.ReadBasic.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/user-list-joinedteams |
+| `teams.list_channels` | `Channel.ReadBasic.All` | `Channel.ReadBasic.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/channel-list |
+| `teams.search_messages` | `none claimed` | `Chat.Read, ChannelMessage.Read.All` | `unsupported_auth_mode` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/search-query |
+| `teams.send_messages` | `none claimed` | `ChannelMessage.Send` | `unsupported_auth_mode` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/channel-post-messages |
+| `WP-D planner.list_plans` | `Tasks.Read.All` | `Tasks.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/planner-list-plans |
+| `WP-D planner.list_buckets` | `Tasks.Read.All` | `Tasks.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/planner-list-buckets |
+| `WP-D planner.list_tasks` | `Tasks.Read.All` | `Tasks.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/plannerplan-list-tasks |
+| `WP-D planner.read` | `Tasks.Read.All` | `Tasks.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/plannertask-get |
+| `WP-D planner.create_tasks` | `Tasks.ReadWrite.All` | `Tasks.ReadWrite` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/planner-post-tasks |
+| `WP-D planner.update_tasks` | `Tasks.ReadWrite.All` | `Tasks.ReadWrite` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/plannertask-update |
+| `WP-D todo.list_task_lists` | `Tasks.Read.All` | `Tasks.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/todo-list-lists |
+| `WP-D todo.search` | `Tasks.Read.All` | `Tasks.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/todotasklist-list-tasks |
+| `WP-D todo.read` | `Tasks.Read.All` | `Tasks.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/todotask-get |
+| `WP-D todo.create_tasks` | `Tasks.ReadWrite.All` | `Tasks.ReadWrite` | `not_verified` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/todotasklist-post-tasks |
+| `WP-D todo.update_tasks` | `Tasks.ReadWrite.All` | `Tasks.ReadWrite` | `not_verified` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/todotask-update |
+| `outlook.search` | `Mail.Read` | `Mail.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/user-list-messages |
+| `outlook.read` | `Mail.Read` | `Mail.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/message-get |
+| `outlook.create_draft` | `Mail.ReadWrite` | `Mail.ReadWrite` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/user-post-messages |
+| `outlook.send` | `Mail.Send` | `Mail.Send` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/user-sendmail; https://learn.microsoft.com/en-us/graph/api/message-send |
+| `calendar.search` | `Calendars.Read` | `Calendars.Read` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/user-list-events |
+| `calendar.create_events` | `Calendars.ReadWrite` | `Calendars.ReadWrite` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/user-post-events |
+| `calendar.update_events` | `Calendars.ReadWrite` | `Calendars.ReadWrite` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/event-update |
+| `sharepoint.search` | `Sites.Read.All` | `Sites.Read.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/site-list; https://learn.microsoft.com/en-us/graph/api/driveitem-search; https://learn.microsoft.com/en-us/graph/api/site-get |
+| `sharepoint.read` | `Sites.Read.All` | `Sites.Read.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/driveitem-get |
+| `sharepoint.download_files` | `Files.Read.All` | `Files.Read.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/driveitem-get-content |
+| `sharepoint.upload_files` | `Files.ReadWrite.All` | `Files.ReadWrite.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/driveitem-put-content |
+| `onedrive.search` | `Files.Read.All` | `Files.Read.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/driveitem-search |
+| `onedrive.read` | `Files.Read.All` | `Files.Read.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/driveitem-get |
+| `onedrive.download_files` | `Files.Read.All` | `Files.Read.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/driveitem-get-content |
+| `onedrive.upload_files` | `Files.ReadWrite.All` | `Files.ReadWrite.All` | `supported` | `not_implemented` | https://learn.microsoft.com/en-us/graph/api/driveitem-put-content |
+
+### Static limitations
+
+- Official endpoint pages establish documented least-privileged roles/scopes and routes, but cannot establish tenant admin consent, token contents, conditional access, service availability, or successful authorization.
+- Application roles and delegated scopes are different permission systems. The matrix does not derive one from the other.
+- Teams message search and send remain claim-free and unsupported in application mode. Delegated mode is recorded but not implemented.
+- To Do application writes remain `not_verified` and non-executable. No unsupported or unverified operation is promoted by this refresh.
