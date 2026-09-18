@@ -59,6 +59,57 @@ def test_execution_seam_sends_only_through_the_injected_adapter(graph_client):
     assert isinstance(caught.value.__cause__, AssertionError)
 
 
+def test_execution_seam_routes_reads_through_retry_policy(graph_client, monkeypatch):
+    from microsoft365 import execution
+
+    seen = []
+
+    def policy(action, **kwargs):
+        seen.append(kwargs["method"])
+        return action()
+
+    monkeypatch.setattr(execution, "run_with_retry", policy)
+    builder = graph_client.users.by_user_id("user").messages
+
+    with pytest.raises(execution.ExecutionError):
+        execution.execute_request(builder, method="GET", adapter=graph_client.request_adapter)
+
+    assert seen == ["GET"]
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_execution_seam_routes_writes_through_single_attempt_policy(graph_client, monkeypatch, method):
+    from microsoft365 import execution
+
+    calls = []
+
+    def policy(action, **kwargs):
+        calls.append(kwargs["method"])
+        return action()
+
+    monkeypatch.setattr(execution, "run_with_retry", policy)
+    if method == "POST":
+        builder = graph_client.users.by_user_id("user").messages.by_message_id("message").send
+        body = None
+    elif method == "PUT":
+        builder = graph_client.drives.by_drive_id("drive").items.by_drive_item_id("item").content
+        body = b"payload"
+    elif method == "PATCH":
+        from msgraph.generated.models.event import Event
+
+        builder = graph_client.users.by_user_id("user").calendar.events.by_event_id("event")
+        body = Event(subject="subject")
+        monkeypatch.setattr(execution, "request_information_sender", lambda *args, **kwargs: None)
+    else:
+        builder = graph_client.users.by_user_id("user").messages.by_message_id("message")
+        body = None
+
+    with pytest.raises(execution.ExecutionError):
+        execution.execute_request(builder, method=method, body=body, adapter=graph_client.request_adapter)
+
+    assert calls == [method]
+
+
 def test_execution_seam_fails_closed_without_an_injected_adapter(graph_client):
     from microsoft365.execution import ExecutionError, execute_request
 

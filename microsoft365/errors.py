@@ -36,8 +36,8 @@ cookie, an arbitrary debug string) is dropped silently.
 
 Retry policy
 ------------
-The seam itself performs **exactly one attempt**: it never replays a request. The retry
-policy lives here, as pure decisions plus one bounded executor (:func:`run_with_retry`):
+* :func:`execute_request` owns the generated request and one transport attempt; the bounded
+  retry policy wraps only idempotent GET/read execution paths and never replays writes.
 
 * only ``GET``/``HEAD``/``OPTIONS`` may be retried -- a ``send``, a ``create_*`` (POST), an
   ``upload`` (PUT) or any PATCH/DELETE is never replayed, even when the failure is a
@@ -707,6 +707,7 @@ def run_with_retry(
     method: Any,
     max_attempts: Any = DEFAULT_MAX_ATTEMPTS,
     sleep: Callable[[float], Any] = _time.sleep,
+    cancelled: Callable[[], bool] | None = None,
 ) -> Any:
     """Run ``action`` at most ``max_attempts`` times, only when the policy allows a replay.
 
@@ -721,9 +722,24 @@ def run_with_retry(
         raise GraphError("configuration_error", MESSAGES["configuration_error"])
     if not callable(sleep):
         raise GraphError("configuration_error", MESSAGES["configuration_error"])
+    if cancelled is not None and not callable(cancelled):
+        raise GraphError("configuration_error", MESSAGES["configuration_error"])
+
+    def check_cancelled() -> None:
+        if cancelled is not None:
+            try:
+                requested = bool(cancelled())
+            except Exception as exc:
+                error = GraphError("internal_error", MESSAGES["internal_error"])
+                error.__cause__ = exc
+                error.__suppress_context__ = True
+                raise error
+            if requested:
+                raise GraphError("internal_error", MESSAGES["internal_error"])
 
     failure: GraphError | None = None
     for attempt in range(limit):
+        check_cancelled()
         try:
             return action()
         except Exception as exc:  # every failure is classified, never re-raised raw
@@ -731,5 +747,13 @@ def run_with_retry(
             decision = retry_decision(failure, method=normalized, attempt=attempt, max_attempts=limit)
             if not decision.retry:
                 raise failure
-            sleep(decision.delay_seconds)
+            check_cancelled()
+            try:
+                sleep(decision.delay_seconds)
+            except Exception as exc:
+                error = GraphError("internal_error", MESSAGES["internal_error"])
+                error.__cause__ = exc
+                error.__suppress_context__ = True
+                raise error
+            check_cancelled()
     raise failure if failure is not None else GraphError("internal_error", MESSAGES["internal_error"])

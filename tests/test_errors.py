@@ -831,6 +831,38 @@ def test_run_with_retry_stops_on_a_non_retryable_failure():
     assert caught.value.category == "not_found"
 
 
+def test_run_with_retry_cancels_before_start_with_a_sanitized_error():
+    attempts = []
+
+    with pytest.raises(taxonomy.GraphError) as caught:
+        taxonomy.run_with_retry(
+            lambda: attempts.append(True), method="GET", cancelled=lambda: True, sleep=lambda _: None
+        )
+
+    assert attempts == []
+    assert caught.value.category == "internal_error"
+    assert taxonomy.MESSAGES["internal_error"] in str(caught.value)
+
+
+def test_run_with_retry_checks_cancellation_after_retry_wait():
+    attempts = []
+    cancelled = [False]
+
+    def action():
+        attempts.append(True)
+        raise _kiota_api_error(status=503, headers={})
+
+    def sleep(_seconds):
+        cancelled[0] = True
+
+    with pytest.raises(taxonomy.GraphError) as caught:
+        taxonomy.run_with_retry(
+            action, method="GET", max_attempts=3, cancelled=lambda: cancelled[0], sleep=sleep
+        )
+
+    assert len(attempts) == 1
+    assert caught.value.category == "internal_error"
+
 def test_run_with_retry_ignores_an_unparseable_retry_after():
     sleeps = []
     error = _kiota_api_error(status=503, headers={"Retry-After": SENTINEL})

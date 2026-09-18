@@ -13,10 +13,10 @@ Strategy chosen: (A) real typed request information + injected adapter
   generated builder's own ``to_<method>_request_information``. It never sends, so HTTP
   method, URL, query parameters, headers and the serialized body stay assertable offline
   (by contract tests and by handlers before they execute).
-* :func:`execute_request` binds that same builder/configuration to an **injected**
-  ``RequestAdapter`` -- the one the client was constructed with -- and performs the send
-  through the SDK's own generated caller (``builder.get()``/``post()``/``put()``/
-  ``patch()``/``delete()``) inside :func:`run_async`.
+* :func:`execute_request` binds that same builder/configuration to the
+  injected ``RequestAdapter`` and performs the send through the SDK's own generated caller
+  inside :func:`run_async`. Idempotent reads pass that one-attempt callable through the bounded
+  retry policy; writes remain single-attempt because the policy's method gate is absolute.
 
 Why the send is delegated to the generated caller instead of calling
 ``adapter.send_async`` here: in the installed SDK the send variant is a property of the
@@ -57,7 +57,14 @@ import inspect
 
 from kiota_abstractions.request_adapter import RequestAdapter
 
-from .errors import MESSAGES, GraphError, classify_upstream, to_graph_error
+from .errors import (
+    DEFAULT_MAX_ATTEMPTS,
+    MESSAGES,
+    GraphError,
+    classify_upstream,
+    run_with_retry,
+    to_graph_error,
+)
 
 _HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 _CALLER_NAMES = {method: method.lower() for method in _HTTP_METHODS}
@@ -163,7 +170,17 @@ def request_information_sender(builder, *, method, configuration=None, body=None
         ) from exc
 
 
-def execute_request(builder, *, method, configuration=None, body=None, adapter):
+def execute_request(
+    builder,
+    *,
+    method,
+    configuration=None,
+    body=None,
+    adapter,
+    max_attempts=DEFAULT_MAX_ATTEMPTS,
+    sleep=None,
+    cancelled=None,
+):
     """Execute one graph request and return the SDK's typed response.
 
     ``adapter`` must be the request adapter injected into the client that produced
@@ -186,8 +203,16 @@ def execute_request(builder, *, method, configuration=None, body=None, adapter):
         raise ExecutionError(
             "configuration_error", f"builder does not expose {_CALLER_NAMES[normalized]}()"
         )
-    awaitable = _call(caller, body=body, configuration=configuration)
-    return run_async(awaitable, category="transport_error")
+    def attempt():
+        # A fresh generated coroutine is required for every replay; coroutine objects are
+        # single-use, while the builder remains the SDK-owned transport seam.
+        awaitable = _call(caller, body=body, configuration=configuration)
+        return run_async(awaitable, category="transport_error")
+
+    retry_options = {"method": normalized, "max_attempts": max_attempts, "cancelled": cancelled}
+    if sleep is not None:
+        retry_options["sleep"] = sleep
+    return run_with_retry(attempt, **retry_options)
 
 
 def resolve_request_adapter(client_factory):

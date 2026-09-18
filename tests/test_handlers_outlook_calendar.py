@@ -496,7 +496,7 @@ def test_outlook_search_never_reaches_the_network_with_the_strict_double():
 
     assert caught.value.category == "transport_error"
     assert "network transport must not run" not in json.dumps(caught.value.to_result())
-    assert len(adapter.requests) == 1
+    assert len(adapter.requests) == 3
 
 
 def test_outlook_read_is_pinned_to_the_verified_item_contract():
