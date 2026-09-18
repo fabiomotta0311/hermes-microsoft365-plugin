@@ -9,21 +9,35 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # The project declares >=3.11,<3.14. Keep this matrix to supported,
+        # secret-free environments; Hermes is not tested on macOS here.
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
       - name: Check out the pinned Hermes host contract
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: NousResearch/hermes-agent
-          ref: 948e9706618220839a20c33c2fc5c19de074d835  # pragma: allowlist secret
+          ref: 948e9706618220839a20c33c2fc5c19de074d835 # pragma: allowlist secret
           path: _upstream/hermes-agent
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
           cache: pip
+      - name: Check the committed uv lock
+        run: |
+          python -m pip install --disable-pip-version-check "uv==0.9.18"
+          uv lock --check
       - name: Install exact tested toolchain
         run: |
           python -m pip install --upgrade "pip==25.2"
@@ -46,8 +60,13 @@ jobs:
               actual = metadata.version(package)
               assert actual == version, (package, actual, version)
           PY
-      - name: Unit and strict SDK contract tests
-        run: python -m pytest -q
+      - name: Unit and strict SDK contract tests with coverage
+        run: |
+          python -m pytest -q \
+            --cov=microsoft365 \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=90
       - name: Native plugin validation
         run: |
           python -m hermes_cli.plugin_validate microsoft365
@@ -55,7 +74,26 @@ jobs:
       - name: Compile and build package
         run: |
           python -m compileall -q microsoft365
+          rm -rf dist
           python -m pip wheel . --no-deps --wheel-dir dist
+      - name: Install the built wheel in a clean environment
+        run: python scripts/release_smoke.py dist/*.whl
+      - name: Audit the built wheel dependency environment
+        run: |
+          python -m venv "$RUNNER_TEMP/hermes-m365-audit"
+          audit_python="$RUNNER_TEMP/hermes-m365-audit/bin/python"
+          "$audit_python" -m pip install --disable-pip-version-check --upgrade pip setuptools "pip-audit==2.9.0"
+          "$audit_python" -m pip install --disable-pip-version-check dist/*.whl
+          "$audit_python" -m pip check
+          "$audit_python" -m pip_audit --progress-spinner off
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.3
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 14
       - name: Secret scan
         run: |
           # Scope note: detect-secrets scans git-tracked files, so vendored or ignored
