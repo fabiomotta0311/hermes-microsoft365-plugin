@@ -129,3 +129,26 @@ def test_desktop_plugin_parses_without_node_dependencies():
         check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_capability_catalog_renders_bounded_accessible_local_selection():
+    source = PLUGIN.read_text(encoding="utf-8")
+    for text in (
+        "stableOperationId", "MAX_SELECTED_OPERATIONS", "type: \"checkbox\"",
+        "aria-label", "selectedCount", "ctx.storage.set", "groupCapabilities",
+        "read operation", "write operation retained",
+    ):
+        assert text in source
+    assert "selected: boundedSelected(draft.selected)" in source
+    assert "PUT" not in source
+    assert "fetch(" not in source
+
+
+def test_capability_selection_never_persists_raw_identifiers_or_selects_writes():
+    source = PLUGIN.read_text(encoding="utf-8")
+    helper = source[source.index("function stableOperationId"):source.index("function Microsoft365Page")]
+    for forbidden in ("tenant_id", "client_id", "user_id", "access_token", "client_secret", "OAuth", "Graph"):
+        assert forbidden.lower() not in helper.lower()
+    assert "row.write" in helper
+    assert "slice(0, MAX_SELECTED_OPERATIONS)" in source
+    assert "write operation retained" in source

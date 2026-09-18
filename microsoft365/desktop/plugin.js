@@ -5,6 +5,7 @@ import { jsx } from "react/jsx-runtime";
 const STORAGE_KEY = "microsoft365.desktop-draft";
 const STEPS = ["Funcionalidades", "Modo de acesso", "Identidade", "Permissões", "Revisão"];
 const INITIAL_DRAFT = { step: 0, mode: "application", selected: [] };
+const MAX_SELECTED_OPERATIONS = 64;
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -138,6 +139,22 @@ function groupCapabilities(operations) {
   }, []);
 }
 
+function stableOperationId(service, operation) {
+  const normalize = (value) => String(value || "")
+    .normalize("NFKD")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+    .slice(0, 64);
+  return `operation-${normalize(service)}-${normalize(operation)}`.slice(0, 140);
+}
+
+function boundedSelected(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item) => typeof item === "string" && /^operation-[a-z0-9-]+$/.test(item)))]
+    .slice(0, MAX_SELECTED_OPERATIONS);
+}
+
 function safeText(value, fallback = "desconhecido") {
   if (typeof value !== "string") return fallback;
   return value.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 240) || fallback;
@@ -185,6 +202,7 @@ function sanitizeCapabilityRow(row, mode) {
     implementationStatus: safeText(status.implementation_status),
     executable: status.executable === true,
     reason: safeText(status.reason),
+    id: stableOperationId(row.service, row.operation),
   };
 }
 
@@ -230,6 +248,27 @@ function CapabilityHelper({ item, mode }) {
   });
 }
 
+function CapabilitySelection({ item, mode, selected, onToggle }) {
+  // read operation selection is local; write operation retained and disabled.
+  const row = sanitizeCapabilityRow(item, mode);
+  const writeOperationRetained = row.write;
+  return jsx("label", {
+    style: { display: "flex", alignItems: "flex-start", gap: "8px", marginTop: "10px" },
+    children: [
+      jsx("input", {
+        type: "checkbox",
+        checked: !writeOperationRetained && selected.includes(row.id),
+        disabled: writeOperationRetained,
+        onChange: () => { if (!writeOperationRetained) onToggle(row.id); },
+        "aria-label": `${row.service} ${row.operation}`,
+      }),
+      jsx("span", { children: writeOperationRetained
+        ? "Escrita retida; não selecionável nesta versão."
+        : "Selecionar operação de leitura para este rascunho local" }),
+    ],
+  });
+}
+
 function Microsoft365Page({ ctx }) {
   const [draft, setDraft] = useState(INITIAL_DRAFT);
   const [loaded, setLoaded] = useState(false);
@@ -242,7 +281,7 @@ function Microsoft365Page({ ctx }) {
     let active = true;
     Promise.resolve(ctx.storage.get(key)).then((saved) => {
       if (active && saved && typeof saved === "object") {
-        setDraft({ ...INITIAL_DRAFT, ...saved, step: Math.max(0, Math.min(STEPS.length - 1, Number(saved.step) || 0)) });
+        setDraft({ ...INITIAL_DRAFT, ...saved, selected: boundedSelected(saved.selected), step: Math.max(0, Math.min(STEPS.length - 1, Number(saved.step) || 0)) });
       }
       if (active) setLoaded(true);
     }).catch(() => { if (active) setLoaded(true); });
@@ -250,14 +289,20 @@ function Microsoft365Page({ ctx }) {
   }, [ctx, key]);
 
   useEffect(() => {
-    if (loaded) ctx.storage.set(key, { step: draft.step, mode: draft.mode, selected: draft.selected });
+    if (loaded) ctx.storage.set(key, { step: draft.step, mode: draft.mode, selected: boundedSelected(draft.selected) });
   }, [ctx, draft, key, loaded]);
 
   const update = (patch) => setDraft((current) => ({ ...current, ...patch }));
+  const toggleSelection = (id) => update({ selected: boundedSelected(draft.selected.includes(id)
+    ? draft.selected.filter((item) => item !== id)
+    : [...draft.selected, id]) });
   const next = () => update({ step: Math.min(STEPS.length - 1, draft.step + 1) });
   const previous = () => update({ step: Math.max(0, draft.step - 1) });
   const capabilityRows = capabilities.data ? capabilities.data.operations : [];
   const capabilityGroups = groupCapabilities(capabilityRows);
+  const readCapabilityCount = capabilityRows.filter((item) => item.write !== true).length;
+  const selectedCount = capabilityRows.filter((item) => item.write !== true
+    && boundedSelected(draft.selected).includes(stableOperationId(item.service, item.operation))).length;
   const configuredMode = configuration.data && configuration.data.authentication_mode;
   const capabilityMode = capabilities.data && capabilities.data.authentication_mode;
   const preflightData = preflight.data;
@@ -290,10 +335,12 @@ function Microsoft365Page({ ctx }) {
     ] }),
     jsx(Section, { title: "Capacidades disponíveis", children: [
       jsx(QueryMessage, { query: capabilities, loading: "Carregando capacidades…", error: "Não foi possível carregar as capacidades.", empty: "Nenhuma capacidade foi publicada pelo dashboard." }),
+      capabilityRows.length ? jsx("p", { role: "status", "aria-live": "polite", style: textStyle("13px", "var(--ui-text-secondary)"), children: `${selectedCount} operação(ões) de leitura selecionada(s) de ${readCapabilityCount}. Escritas retidas permanecem visíveis e não selecionáveis.` }) : null,
       capabilityGroups.length ? jsx("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: "12px" }, children: capabilityGroups.map((group) => jsx("div", { key: group.service, style: { padding: "14px", border: "1px solid var(--ui-stroke-secondary)", borderRadius: "8px" }, children: [
         jsx("strong", { children: group.service }),
         jsx("ul", { style: { paddingLeft: "18px", marginBottom: 0 }, children: group.items.map((item) => jsx("li", { key: `${item.service}.${item.operation}`, style: textStyle("13px", "var(--ui-text-secondary)"), children: [
           `${item.operation}${item.write ? " (escrita retida; não habilitada)" : ""} — ${item.status.reason}`,
+          jsx(CapabilitySelection, { item, mode: capabilityMode, selected: boundedSelected(draft.selected), onToggle: toggleSelection }),
           jsx(CapabilityHelper, { item, mode: capabilityMode }),
         ] })) }),
       ] })) }) : null,
