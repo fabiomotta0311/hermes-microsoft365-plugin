@@ -18,3 +18,9 @@ Use test-driven development for runtime behavior: add a focused failing test, co
 Do not use real credentials, tenant data, or Graph network calls in unit tests. Never commit `.env`, tokens, secrets, tenant responses, or generated evidence that claims remote verification.
 
 Use focused conventional commits (`test:`, `feat:`, `fix:`, `docs:`, `chore:`).
+
+## Review and merge
+
+External pull requests require a green `ci-gate` check and maintainer (Code Owner)
+approval before merge; see `docs/review-policy.md` for the acceptance criteria and
+approval flow.

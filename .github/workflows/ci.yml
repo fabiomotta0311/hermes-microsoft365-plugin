@@ -117,3 +117,23 @@ jobs:
           PY
       - name: Diff hygiene
         run: git diff --check
+
+  # Stable required check for branch protection. The matrix job names above are
+  # version-dependent (test (3.11), test (3.12), ...), so the protection rule
+  # pins this single gate instead. It runs even when the matrix is skipped or
+  # cancelled and fails unless every matrix job succeeded.
+  ci-gate:
+    needs: test
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the full CI matrix to pass
+        run: |
+          result="${{ needs.test.result }}"
+          if [ "$result" = "success" ]; then
+            echo "ci-gate: matrix passed"
+          else
+            echo "::error::ci-gate: matrix result was '$result' (expected success)"
+            exit 1
+          fi
