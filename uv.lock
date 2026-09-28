@@ -592,7 +592,7 @@ test = [
 requires-dist = [
     { name = "azure-identity", specifier = "==1.25.3" },
     { name = "detect-secrets", marker = "extra == 'test'", specifier = "==1.5.0" },
-    { name = "microsoft-kiota-abstractions", specifier = "==1.12.3" },
+    { name = "microsoft-kiota-abstractions", specifier = "==1.14.0" },
     { name = "microsoft-kiota-http", specifier = "==1.12.3" },
     { name = "microsoft-kiota-serialization-json", specifier = "==1.12.3" },
     { name = "msgraph-sdk", specifier = "==1.62.0" },
@@ -706,16 +706,16 @@ wheels = [
 
 [[package]]
 name = "microsoft-kiota-abstractions"
-version = "1.12.3"
+version = "1.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
     { name = "std-uritemplate" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/29/7e73785c804731704d2f161811fbc2f54d0d81ee5bab06f2e281029a7da3/microsoft_kiota_abstractions-1.12.3.tar.gz", hash = "sha256:b65d77d8b56efd882b318da751a3ae3f6663b88d986da7c4f836c3ed1d653894", size = 25549, upload-time = "2026-09-11T18:42:35.616Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/f1/106e5522a196257d67f6c349617b41a9f3a636efe5ac1027f2e154366450/microsoft_kiota_abstractions-1.14.0.tar.gz", hash = "sha256:620bee999233b7a5e3c09c61be2f934b94028fa17e9357882423677954e81e24", size = 25570, upload-time = "2026-09-21T15:24:29.178Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/13/5e14609f83ea25dfd347a8e4ccac131a80dd221de58d42f79fd68c537a22/microsoft_kiota_abstractions-1.12.3-py3-none-any.whl", hash = "sha256:d3b117163682283e93fa0e4ecae9c55944f263500d6bce27d5bb350a2faeff5b", size = 44689, upload-time = "2026-09-11T18:42:43.767Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/6e/452cbcaa03a0b1fc78de1e5b3cd4baf439e80196b1f83efe9a842fd77a28/microsoft_kiota_abstractions-1.14.0-py3-none-any.whl", hash = "sha256:b6a07dc8874413131ed5780b95ac73bd0292cb4171f718ab6bf2225d8ff617e8", size = 44700, upload-time = "2026-09-21T15:24:36.941Z" },
 ]
 
 [[package]]
