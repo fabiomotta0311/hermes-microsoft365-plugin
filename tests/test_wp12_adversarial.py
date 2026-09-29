@@ -178,7 +178,6 @@ def test_payload_validation_precedes_authentication_for_unknown_and_malformed_ca
 _READ_TO_WRITE_CASES = (
     ("sharepoint", "download_files", "upload_files"),
     ("onedrive", "download_files", "upload_files"),
-    ("outlook", "read", "create_draft"),
     ("outlook", "read", "send"),
     ("calendar", "search", "create_events"),
     ("calendar", "search", "update_events"),

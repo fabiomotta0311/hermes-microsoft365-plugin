@@ -837,6 +837,7 @@ MESSAGING_OPERATIONS: tuple[str, ...] = (
 EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "outlook.search",
     "outlook.read",
+    "outlook.create_draft",
     "calendar.search",
     "sharepoint.search",
     "sharepoint.read",

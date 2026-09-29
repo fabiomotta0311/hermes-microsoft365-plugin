@@ -1103,7 +1103,7 @@ def test_dispatch_path_rejects_before_reaching_a_registered_handler(monkeypatch)
 #: The eleven reads this milestone exposes to the model.
 EXECUTABLE_READS = frozenset(
     {
-        "outlook.search", "outlook.read", "calendar.search",
+        "outlook.search", "outlook.read", "outlook.create_draft", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels",
@@ -1116,7 +1116,7 @@ EXECUTABLE_READS = frozenset(
 #: while the generic host approval fix (CORE-1/CORE-2) is unreleased (R5).
 WITHHELD_WRITES = frozenset(
     {
-        "outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events",
+        "outlook.send", "calendar.create_events", "calendar.update_events",
         "sharepoint.upload_files", "onedrive.upload_files",
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }

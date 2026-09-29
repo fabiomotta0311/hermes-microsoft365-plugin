@@ -155,4 +155,8 @@ def test_cross_profile_a_b_a_binding_is_fail_closed_without_secret_or_client(mon
 def test_writes_remain_non_executable_after_boundary_is_applied():
     from microsoft365.contract import OPERATION_REGISTRY
 
-    assert all(not definition.executable for definition in OPERATION_REGISTRY.values() if definition.write)
+    assert all(
+        definition.executable == (key == "outlook.create_draft")
+        for key, definition in OPERATION_REGISTRY.items()
+        if definition.write
+    )
