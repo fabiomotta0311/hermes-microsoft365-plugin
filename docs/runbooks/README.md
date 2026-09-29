@@ -12,6 +12,7 @@ These runbooks apply to the Alpha-only `v0.1.0a2` pre-release. They describe saf
 ## Runbooks
 
 - [Consent and tenant readiness](consent.md)
+- [Tenant smoke test](tenant-smoke.md): sanitized read verification and gated write procedure
 - [Graph response status triage](graph-errors.md): 401, 403, 404, 409, 412, 429, and 5xx
 - [Rollback](rollback.md)
 - [Incident response](incident-response.md)
