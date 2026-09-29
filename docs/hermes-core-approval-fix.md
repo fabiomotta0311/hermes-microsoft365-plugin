@@ -37,6 +37,6 @@ superfície de escritas deste plugin continua deliberadamente não executável a
 2. consentimento administrativo no tenant;
 3. execução remota autorizada conforme o runbook
    [`tenant-smoke.md`](runbooks/tenant-smoke.md);
-4. promoção explícita de uma operação reversível, começando por `outlook.create_draft`.
+4. uso da capability `outlook.create_draft`, agora promovida como o primeiro piloto reversível.
 
 Não aplique o patch e habilite `outlook.send` como parte do mesmo rollout.

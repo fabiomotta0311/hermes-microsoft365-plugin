@@ -12,8 +12,7 @@ segredos no repositório. Ele deve ser executado no mesmo ambiente Hermes que fo
 - `tenant_id`, `client_id` e `user_id` configurados no namespace do plugin;
 - `MICROSOFT365_CLIENT_SECRET` disponível somente no secret scope do Hermes;
 - uma conta de teste dedicada, sem dados pessoais;
-- operações de escrita ainda devem permanecer desabilitadas até o host Hermes suportar
-  aprovação vinculada ao payload final (CORE-1/CORE-2).
+- `outlook.create_draft` só deve ser usado com o Hermes contendo o patch de aprovação final-argumento; sem ele, mantenha a capability desabilitada.
 
 ## Sequência obrigatória
 
