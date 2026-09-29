@@ -58,6 +58,7 @@ This document states the boundary of the first standalone milestone. It is not r
 ## Host dependency
 
 Hermes currently has a generic approval modification-order defect described in the governing plan: an earlier hook can modify arguments after another hook evaluated approval against different arguments. This repository does not add a Microsoft-specific workaround. Write execution must remain disabled until the separate generic Hermes core fix binds approval to the final arguments that execute.
+A tested core patch for that dependency is included in [`docs/hermes-core-approval-fix.md`](hermes-core-approval-fix.md), but it is not applied automatically to the user's Hermes installation.
 
 ## Files and pagination
 

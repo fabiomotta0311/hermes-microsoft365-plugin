@@ -1,0 +1,126 @@
+From 97104da814a902efe11cce644746e6b073ed79e0 Mon Sep 17 00:00:00 2001
+From: Fabio Motta <fabiomotta@gmail.com>
+Date: Mon, 28 Sep 2026 23:32:46 -0300
+Subject: [PATCH] fix(approval): bind write approval to final tool arguments
+
+---
+ agent/agent_runtime_helpers.py   | 22 +++++++++++++++++++++-
+ hermes_cli/plugins.py            | 22 ++++++++++++++++++++++
+ tests/hermes_cli/test_plugins.py | 19 +++++++++++++++++++
+ 3 files changed, 62 insertions(+), 1 deletion(-)
+
+diff --git a/agent/agent_runtime_helpers.py b/agent/agent_runtime_helpers.py
+index d780c4c19dd..58e11de34cc 100644
+--- a/agent/agent_runtime_helpers.py
++++ b/agent/agent_runtime_helpers.py
+@@ -2433,9 +2433,29 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
+     if skip_tool_execution_middleware:
+         return _execute(function_args)
+     from hermes_cli.middleware import run_tool_execution_middleware
++
++    def _execute_after_middleware(next_args):
++        """Rebind approval when execution middleware changed the final payload."""
++        candidate = next_args if isinstance(next_args, dict) else function_args
++        if candidate != function_args:
++            final_block, candidate = _pre_tool_block_message(
++                agent, function_name, candidate, effective_task_id, tool_call_id,
++                _tool_middleware_trace,
++            )
++            if final_block is not None:
++                result = json.dumps({"error": final_block}, ensure_ascii=False)
++                emit_terminal_post_tool_call(
++                    agent, function_name=function_name, function_args=candidate, result=result,
++                    effective_task_id=effective_task_id, tool_call_id=tool_call_id, status="blocked",
++                    error_type="plugin_block", error_message=final_block,
++                    middleware_trace=_tool_middleware_trace,
++                )
++                return result
++        return _execute(candidate)
++
+     return run_tool_execution_middleware(
+         function_name, function_args,
+-        lambda next_args: _execute(next_args if isinstance(next_args, dict) else function_args),
++        _execute_after_middleware,
+         original_args=function_args, **hook_ids,
+     )
+ 
+diff --git a/hermes_cli/plugins.py b/hermes_cli/plugins.py
+index 15fa39d7154..cc17e80d8ad 100644
+--- a/hermes_cli/plugins.py
++++ b/hermes_cli/plugins.py
+@@ -1802,6 +1802,7 @@ def _get_pre_tool_call_directive_details(
+     tool_name: str, args: Optional[Dict[str, Any]], task_id: str = "", session_id: str = "",
+     tool_call_id: str = "", turn_id: str = "", api_request_id: str = "",
+     middleware_trace: Optional[List[Dict[str, Any]]] = None,
++    allow_modify: bool = True,
+ ) -> _PreToolCallDirective:
+     """Check ``pre_tool_call`` hooks for ``{"action": "block", "message"}`` (veto; message becomes
+     the tool result) or ``{"action": "approve", "message", "rule_key"?}`` (escalate ANY tool to the
+@@ -1826,6 +1827,8 @@ def _get_pre_tool_call_directive_details(
+         # so modify directives are visible even when a later hook blocks. Each modify directive
+         # shallow-merges its keys into one accumulated dict built from the original args.
+         if action == "modify":
++            if not allow_modify:
++                continue
+             partial = result.get("args")
+             if isinstance(partial, dict) and partial:
+                 modified_args = {**(modified_args if modified_args is not None else
+@@ -1907,6 +1910,25 @@ def _dispatch_pre_tool_call_hooks(
+     """Invoke ``pre_tool_call`` hooks once; return ``(block_message, modified_args)`` — the resolved
+     block/approve message (``None`` to proceed) and merged ``modify`` args (``None`` if none)."""
+     details = _get_pre_tool_call_directive_details(tool_name, args, **hook_kwargs)
++    # A modifier can change the payload after another hook's approval decision was evaluated.
++    # Re-run the verdict against the merged payload, without reapplying modifiers. This makes
++    # approval fail closed when a later hook changes a write destination or action.
++    if details.modified_args is not None and details.action == "approve":
++        final_details = _get_pre_tool_call_directive_details(
++            tool_name, details.modified_args, allow_modify=False, **hook_kwargs
++        )
++        if final_details.action != "approve":
++            return (
++                final_details.message
++                or f"BLOCKED: approval was not granted for the final arguments of {tool_name}",
++                details.modified_args,
++            )
++        details = _PreToolCallDirective(
++            action=final_details.action,
++            message=final_details.message,
++            rule_key=final_details.rule_key,
++            modified_args=details.modified_args,
++        )
+     block_msg = _resolve_block_from_details(
+         details, tool_name, **{k: hook_kwargs.get(k, "") for k in ("turn_id", "tool_call_id", "session_id")})
+     return (block_msg, details.modified_args)
+diff --git a/tests/hermes_cli/test_plugins.py b/tests/hermes_cli/test_plugins.py
+index 0459d26500c..48f77963988 100644
+--- a/tests/hermes_cli/test_plugins.py
++++ b/tests/hermes_cli/test_plugins.py
+@@ -1618,6 +1618,25 @@ class TestPreToolCallDirective:
+         )
+         assert get_pre_tool_call_directive("write_file", {}) == ("approve", None)
+ 
++    def test_approval_is_rechecked_after_argument_modification(self, monkeypatch):
++        """A write modified after approval must be evaluated against final arguments."""
++        seen = []
++
++        def hooks(_hook_name, **kwargs):
++            seen.append(kwargs["args"])
++            if kwargs["args"].get("path") == "safe.txt":
++                return [{"action": "modify", "args": {"path": "unsafe.txt"}},
++                        {"action": "approve", "message": "approved"}]
++            return []
++
++        monkeypatch.setattr("hermes_cli.plugins.invoke_hook", hooks)
++        block, modified = _dispatch_pre_tool_call_hooks("write_file", {"path": "safe.txt"})
++
++        assert block is not None
++        assert "final arguments" in block
++        assert modified == {"path": "unsafe.txt"}
++        assert seen == [{"path": "safe.txt"}, {"path": "unsafe.txt"}]
++
+ 
+ class TestResolvePreToolBlock:
+     """Tests for the single dispatch-site chokepoint that resolves a
+-- 
+2.55.0.windows.5
+
