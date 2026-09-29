@@ -52,6 +52,10 @@ The administrative registry retains all operations:
 
 The registry records authentication support, implementation state, permissions, and write approval requirements per operation. Unsupported or not-yet-verified combinations are reported rather than deleted or silently promoted into active schemas.
 
+`calendar.create_events` supports the optional `transaction_id` argument. It is sent as Graph's
+`transactionId`, so a caller can make retries of the same create operation deduplicable. This is
+request-contract support only while the host write-approval dependency remains unresolved.
+
 ## Verification boundary
 
 The test suite is offline. It uses `msgraph-sdk==1.62.0` generated request builders, generated models, Kiota `RequestInformation`, and a strict transport-boundary adapter. It verifies typed request configurations for representative Outlook, Calendar, To Do, drive, Teams, and Planner collections; real collection response normalization; complete binary base64 preservation; strict capability parsing; schema registration; and scoped secret access.

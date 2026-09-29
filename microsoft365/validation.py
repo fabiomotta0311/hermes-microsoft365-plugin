@@ -458,6 +458,8 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 _spec("body", "text", max_length=MAX_TEXT_LENGTH),
                 _spec("location", "text"),
                 _spec("is_all_day", "boolean"),
+                # Graph uses this client-supplied key to deduplicate event creation retries.
+                _spec("transaction_id", "identifier"),
             ),
         ),
         "calendar.update_events": OperationArguments(

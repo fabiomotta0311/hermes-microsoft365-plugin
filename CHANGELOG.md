@@ -23,6 +23,8 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+- Added optional Microsoft Graph `transactionId` support to `calendar.create_events`, allowing
+  callers to make event creation retries deduplicable once write execution is enabled.
 - Added release engineering for reproducible wheel builds, isolated install smoke tests,
   SHA-256 checksums, and a lockfile-derived CycloneDX SBOM artifact.
 - Documented the release procedure and the boundary between build evidence and catalog

@@ -897,6 +897,23 @@ def test_calendar_create_events_carries_every_declared_optional_field():
     ]
 
 
+def test_calendar_create_events_supports_graph_transaction_id_for_safe_retries():
+    adapter = HandlerGraphAdapter({("POST", f"/users/{USER}/calendar/events"): Event(id="event-3")})
+    arguments = {
+        "action": "create_events",
+        "user_id": USER,
+        "subject": "Planning",
+        "start_date_time": START,
+        "end_date_time": END,
+        "time_zone": TIME_ZONE,
+        "transaction_id": "client-operation-123",
+    }
+
+    run(CALENDAR_CREATE_EVENTS, arguments, adapter)
+
+    assert serialized(adapter.requests[0])["transactionId"] == "client-operation-123"
+
+
 def test_calendar_create_events_refuses_an_offsetless_date_without_a_time_zone():
     adapter = HandlerGraphAdapter()
     arguments = {

@@ -76,6 +76,7 @@ EVENT_WIRE_KEYS: Mapping[str, tuple[str, ...]] = {
     "location": ("location",),
     "attendees": ("attendees",),
     "is_all_day": ("isAllDay",),
+    "transaction_id": ("transactionId",),
 }
 
 #: The fields a ``calendar.create_events`` call may carry, as the argument contract declares.
@@ -88,6 +89,7 @@ CREATE_EVENT_FIELDS = (
     "location",
     "attendees",
     "is_all_day",
+    "transaction_id",
 )
 
 
@@ -200,6 +202,7 @@ def create_events(arguments: Mapping, context: HandlerContext) -> dict:
     is_all_day = arguments.get("is_all_day")
     if is_all_day is not None and type(is_all_day) is not bool:
         refuse("validation_error", f"{CREATE_EVENTS}: is_all_day must be a real boolean")
+    transaction_id = arguments.get("transaction_id")
 
     start = date_time_time_zone(
         arguments, "start_date_time", operation=CREATE_EVENTS, time_zone=time_zone, required=True
@@ -215,6 +218,7 @@ def create_events(arguments: Mapping, context: HandlerContext) -> dict:
         location=Location(display_name=location) if location else None,
         attendees=attendee_models(arguments, "attendees", operation=CREATE_EVENTS),
         is_all_day=is_all_day,
+        transaction_id=transaction_id,
     )
 
     client, adapter = open_graph_client(context)

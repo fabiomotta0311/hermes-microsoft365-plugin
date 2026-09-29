@@ -422,6 +422,7 @@ def build_write_request_information(
     recipients=None,
     start=None,
     end=None,
+    transaction_id: str = "",
     title: str = "",
     due_date_time=None,
     status=None,
@@ -475,7 +476,12 @@ def build_write_request_information(
                 raise ValueError(f"{name} must be a DateTimeTimeZone")
         builder = client.users.by_user_id(_required(user_id, "user_id")).calendar.events
         return builder.to_post_request_information(
-            Event(subject=_required(subject, "subject"), start=start, end=end),
+            Event(
+                subject=_required(subject, "subject"),
+                start=start,
+                end=end,
+                transaction_id=transaction_id or None,
+            ),
             RequestConfiguration(headers=_headers()),
         )
     if case == "calendar_update_events":

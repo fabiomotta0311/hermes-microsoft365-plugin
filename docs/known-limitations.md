@@ -26,6 +26,9 @@ This document states the boundary of the first standalone milestone. It is not r
 - The dispatch path re-evaluates executability on the **final arguments** (`operation_is_executable`, invariant 15) with the same `active_actions()`/`operation_status()` gate the `pre_tool_call` hook uses. A payload whose `action` is changed from a read into a write after a hook approved the read is refused before any handler, secret, credential, client or request work, with the same message the hook returns. This is the plugin-side mitigation of the host defect below, not a replacement for the core fix.
 - `outlook.send` has two endpoints -- `/users/{user_id}/sendMail` for a composed message and `/users/{user_id}/messages/{message_id}/send` for a draft that already exists -- and supplying both forms, or neither, is refused instead of silently sending one.
 - An offsetless date and time must be accompanied by `time_zone`, and `calendar.search` refuses `start_date_time`/`end_date_time`/`time_zone` because the endpoint's acceptance of a date filter is not recorded offline; `calendar.update_events` requires the ETag it cannot be conditional without.
+- `calendar.create_events` accepts the optional Graph `transaction_id` and serializes it as
+  `transactionId`. Clients should provide a stable value when their workflow may retry a create;
+  this improves duplicate protection but does not itself enable writes or replace host approval.
 - `calendar.search` and `outlook.search` apply the caller's item budget through the paginator.
 
 ## SharePoint and OneDrive
