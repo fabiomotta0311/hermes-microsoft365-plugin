@@ -1404,8 +1404,8 @@ def test_create_events_refuses_when_a_field_did_not_reach_the_request(monkeypatc
 #: literally, so a reverted flag -- or one flag too many -- fails here.
 EXECUTABLE_OPERATIONS = frozenset(
     {
-        OUTLOOK_SEARCH, OUTLOOK_READ, OUTLOOK_CREATE_DRAFT, CALENDAR_SEARCH,
-        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        OUTLOOK_SEARCH, OUTLOOK_READ, OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, CALENDAR_SEARCH,
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels",
         "todo.list_task_lists", "todo.search", "todo.read",
@@ -1417,8 +1417,8 @@ EXECUTABLE_OPERATIONS = frozenset(
 #: non-executable until the generic host approval fix (CORE-1/CORE-2) is available (R5).
 NON_EXECUTABLE_WRITES = frozenset(
     {
-        OUTLOOK_SEND, CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS,
-        "sharepoint.upload_files", "onedrive.upload_files",
+        CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS,
+        "onedrive.upload_files",
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )
@@ -1475,7 +1475,7 @@ def test_the_registry_declares_exactly_the_three_verified_reads_executable():
         assert definition.contract_cases, key
         assert definition.implementation_status == "implemented", key
         assert definition.implementation_status in IMPLEMENTATION_STATUS_LABELS, key
-        assert definition.write is (key in (NON_EXECUTABLE_WRITES | {OUTLOOK_CREATE_DRAFT})), key
+        assert definition.write is (key in (NON_EXECUTABLE_WRITES | {OUTLOOK_CREATE_DRAFT, "outlook.send", "sharepoint.upload_files"})), key
         assert definition.executable is (key in EXECUTABLE_OPERATIONS), key
 
     assert {

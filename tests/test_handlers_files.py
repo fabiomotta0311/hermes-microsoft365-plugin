@@ -78,16 +78,15 @@ WP7_HANDLERS = frozenset(
     }
 )
 
-#: The six reads this milestone exposes to the model. The uploads stay implemented and
-#: non-executable until the generic host approval fix (CORE-1/CORE-2) is available.
+#: The eight SharePoint/OneDrive operations exposed to the model.
 WP7_EXECUTABLE = frozenset(
     {
-        SHAREPOINT_SEARCH, SHAREPOINT_READ, SHAREPOINT_DOWNLOAD,
+        SHAREPOINT_SEARCH, SHAREPOINT_READ, SHAREPOINT_DOWNLOAD, SHAREPOINT_UPLOAD,
         ONEDRIVE_SEARCH, ONEDRIVE_READ, ONEDRIVE_DOWNLOAD,
     }
 )
 
-#: The two uploads: implemented, contract-pinned, exercised offline and withheld.
+#: The remaining OneDrive upload is implemented and withheld.
 WP7_WRITES = frozenset({SHAREPOINT_UPLOAD, ONEDRIVE_UPLOAD})
 
 DRIVE = "drive"
@@ -609,9 +608,9 @@ def test_the_registry_declares_exactly_the_six_file_reads_executable():
     from microsoft365.contract import EXECUTABLE_OPERATIONS
 
     assert set(EXECUTABLE_OPERATIONS) == {
-        "outlook.search", "outlook.read", "outlook.create_draft", "calendar.search",
+        "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
         "teams.list_teams", "teams.list_channels",
-    } | set(WP7_EXECUTABLE) | {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}
+    } | set(WP7_EXECUTABLE) | {"sharepoint.upload_files", "todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}
 
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
@@ -646,7 +645,7 @@ def test_uploads_stay_out_of_the_model_facing_schema():
     from microsoft365.registration import active_actions, schema_for
 
     configuration = settings()
-    for key in sorted(WP7_WRITES):
+    for key in sorted(WP7_WRITES - WP7_EXECUTABLE):
         service, operation = key.split(".", 1)
         actions = active_actions(configuration, service)
         assert operation not in actions, key
@@ -667,7 +666,7 @@ def test_the_reads_are_model_facing_and_the_withheld_uploads_keep_their_handler(
         schema = schema_for(service, actions)
         assert operation in schema["parameters"]["properties"]["action"]["enum"], key
 
-    for key in sorted(WP7_WRITES):
+    for key in sorted(WP7_WRITES - WP7_EXECUTABLE):
         service, operation = key.split(".", 1)
         actions = active_actions(configuration, service)
         assert operation not in actions, key

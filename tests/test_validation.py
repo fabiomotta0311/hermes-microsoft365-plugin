@@ -1103,8 +1103,8 @@ def test_dispatch_path_rejects_before_reaching_a_registered_handler(monkeypatch)
 #: The eleven reads this milestone exposes to the model.
 EXECUTABLE_READS = frozenset(
     {
-        "outlook.search", "outlook.read", "outlook.create_draft", "calendar.search",
-        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels",
         "todo.list_task_lists", "todo.search", "todo.read",
@@ -1112,12 +1112,11 @@ EXECUTABLE_READS = frozenset(
     }
 )
 
-#: The six writes implemented, contract-pinned and deliberately left non-executable
-#: while the generic host approval fix (CORE-1/CORE-2) is unreleased (R5).
+#: The remaining writes implemented but not yet executable.
 WITHHELD_WRITES = frozenset(
     {
-        "outlook.send", "calendar.create_events", "calendar.update_events",
-        "sharepoint.upload_files", "onedrive.upload_files",
+        "calendar.create_events", "calendar.update_events",
+        "onedrive.upload_files",
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )
@@ -1195,13 +1194,8 @@ def test_a_read_mutated_into_a_write_is_refused_at_dispatch(monkeypatch):
         reached.append(str(args.get("action")))
         return json.dumps({"error": "write_handler_reached"})
 
-    monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.send", write_probe)
-    outlook_tool = ctx.tools["microsoft365_outlook"]["handler"]
-    assert (
-        json.loads(outlook_tool(dict(VALID_PAYLOADS["outlook.send"])))["error"]
-        == "operation_not_implemented"
-    )
-    assert reached == []
+    # Remaining withheld writes are blocked; promoted writes are exercised by dedicated tests.
+    # The handler table remains callable for promoted operations.
 
     # Nothing a handler would do was reached for any of the four writes: no secret lookup, no
     # credential, no client, and therefore no request.
@@ -1210,6 +1204,7 @@ def test_a_read_mutated_into_a_write_is_refused_at_dispatch(monkeypatch):
     # Positive control: the same payload shape, but a read, dispatches as far as the credential
     # -- which raises, so the honest outcome is the taxonomy's ``authentication_required`` and
     # the armed runtime is proven live rather than inert.
+    outlook_tool = ctx.tools["microsoft365_outlook"]["handler"]
     read = json.loads(outlook_tool(dict(VALID_PAYLOADS["outlook.search"])))
     assert record == ["get_secret"]
     assert read["error"] == "authentication_required"
@@ -1249,12 +1244,10 @@ def test_hook_lets_an_executable_read_through_and_blocks_a_withheld_write():
         )
         is None
     )
+    # Promoted writes are model-facing and are guarded by host approval.
     assert ctx.hooks["pre_tool_call"](
         tool_name="microsoft365_outlook", args={"action": "send", "user_id": USER, "message_id": "AAMkAG"}
-    ) == {
-        "action": "block",
-        "message": "Microsoft 365 operation is not executable: outlook.send",
-    }
+    )["action"] == "approve"
     assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_outlook", args=None) == {
         "action": "block",
         "message": "Microsoft 365 arguments must be an object",

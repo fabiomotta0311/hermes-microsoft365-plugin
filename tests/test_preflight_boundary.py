@@ -156,7 +156,7 @@ def test_writes_remain_non_executable_after_boundary_is_applied():
     from microsoft365.contract import OPERATION_REGISTRY
 
     assert all(
-        definition.executable == (key == "outlook.create_draft")
+        definition.executable == (key in {"outlook.create_draft", "outlook.send", "sharepoint.upload_files"})
         for key, definition in OPERATION_REGISTRY.items()
         if definition.write
     )

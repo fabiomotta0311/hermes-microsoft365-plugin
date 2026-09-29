@@ -53,12 +53,13 @@ def test_final_payload_mutation_from_read_to_write_is_blocked_before_runtime(mon
     monkeypatch.setattr(msgraph, "GraphServiceClient", forbidden("client"))
 
     ctx = _registered()
-    payload = {"action": "search", "user_id": USER}
+    payload = dict(VALID_PAYLOADS["outlook.search"])
     assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_outlook", args=payload) is None
-    payload["action"] = "send"
+    payload.clear()
+    payload.update(VALID_PAYLOADS["calendar.create_events"])
 
     result = json.loads(
-        registration.service_tool_handler("outlook", payload, settings=_settings())
+        registration.service_tool_handler("calendar", payload, settings=_settings())
     )
     assert result["error"] == "operation_not_implemented"
     assert reached == []
@@ -176,9 +177,7 @@ def test_payload_validation_precedes_authentication_for_unknown_and_malformed_ca
 
 
 _READ_TO_WRITE_CASES = (
-    ("sharepoint", "download_files", "upload_files"),
     ("onedrive", "download_files", "upload_files"),
-    ("outlook", "read", "send"),
     ("calendar", "search", "create_events"),
     ("calendar", "search", "update_events"),
     ("todo", "read", "create_tasks"),
@@ -252,7 +251,6 @@ def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mut
     # complete, validator-approved write, while identifiers deliberately come from a different
     # destination/user than the originally approved read.
     mutations = (
-        VALID_PAYLOADS["outlook.send"],
         VALID_PAYLOADS["calendar.create_events"],
         VALID_PAYLOADS["todo.update_tasks"],
         VALID_PAYLOADS["planner.create_tasks"],

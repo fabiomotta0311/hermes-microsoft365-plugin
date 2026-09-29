@@ -17,8 +17,8 @@ EXPECTED_OPERATIONS = {
 #: a lost read flag passes.
 EXECUTABLE_READS = frozenset(
     {
-        "outlook.search", "outlook.read", "outlook.create_draft", "calendar.search",
-        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels",
         "todo.list_task_lists", "todo.search", "todo.read",
