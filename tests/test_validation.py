@@ -250,7 +250,7 @@ INVALID_CALLS: tuple[tuple[str, str, object, str, str], ...] = (
 )
 
 
-def _settings(mode: str = "application"):
+def _settings(mode: str = "application", *, user_id: str = USER):
     from microsoft365.contract import OPERATIONS, Settings
 
     capabilities = {service: True for service in OPERATIONS}
@@ -262,13 +262,27 @@ def _settings(mode: str = "application"):
         # nothing at all); the record is built directly so the validator's own refusal of an
         # unsupported authentication mode is still exercised.
         return Settings(authentication_mode="hybrid", capabilities={})
-    return Settings.from_mapping({"capabilities": capabilities, "authentication_mode": mode})
+    return Settings.from_mapping(
+        {"capabilities": capabilities, "authentication_mode": mode, "user_id": user_id}
+    )
 
 
 def _check(service: str, payload, *, mode: str = "application"):
     from microsoft365.validation import check
 
     return check(_settings(mode), service=service, arguments=payload)
+
+
+def test_application_user_scoped_operation_fails_closed_without_profile_user():
+    from microsoft365.validation import check
+
+    rejection = check(
+        _settings(user_id=""), service="outlook", arguments={"action": "search", "user_id": USER}
+    )
+
+    assert rejection is not None
+    assert rejection.category == "configuration_error"
+    assert "configured user_id is required" in rejection.message
 
 
 class RecordingContext:
@@ -293,6 +307,7 @@ def _config(mode: str = "application", *, capabilities=None):
     from microsoft365.contract import OPERATIONS
 
     return {
+        "user_id": USER,
         "capabilities": capabilities or {service: True for service in OPERATIONS},
         "authentication_mode": "application" if mode == "disabled_read" else mode,
     }
@@ -855,7 +870,7 @@ def test_oversized_base64_is_refused_before_decoding():
 def test_bounded_strings_accept_the_declared_limit_and_refuse_one_more_character():
     from microsoft365.validation import MAX_IDENTIFIER_LENGTH, MAX_TEXT_LENGTH, check
 
-    settings = _settings("application")
+    settings = _settings("application", user_id="u" * MAX_IDENTIFIER_LENGTH)
 
     at_limit = check(
         settings,
@@ -875,7 +890,7 @@ def test_bounded_strings_accept_the_declared_limit_and_refuse_one_more_character
         service="outlook",
         arguments={
             "action": "create_draft",
-            "user_id": USER,
+            "user_id": "u" * MAX_IDENTIFIER_LENGTH,
             "subject": "s",
             "body": "b" * MAX_TEXT_LENGTH,
             "to_recipients": [RECIPIENT],
@@ -887,7 +902,7 @@ def test_bounded_strings_accept_the_declared_limit_and_refuse_one_more_character
         service="outlook",
         arguments={
             "action": "create_draft",
-            "user_id": USER,
+            "user_id": "u" * MAX_IDENTIFIER_LENGTH,
             "subject": "s",
             "body": "b" * (MAX_TEXT_LENGTH + 1),
             "to_recipients": [RECIPIENT],
@@ -1142,6 +1157,7 @@ def test_a_read_mutated_into_a_write_is_refused_at_dispatch(monkeypatch):
         {
             "tenant_id": "tenant",
             "client_id": "client",
+            "user_id": USER,
             "authentication_mode": "application",
             "capabilities": {service: True for service in SERVICES},
         }

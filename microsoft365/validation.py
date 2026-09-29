@@ -1020,9 +1020,14 @@ def _check_bound_user(settings: Settings, key: str, arguments: Mapping[str, Any]
     """Enforce the configured profile's single-user resource boundary."""
     configured = settings.user_id.strip()
     definition = OPERATION_REGISTRY[key]
-    if not configured or "user_id" not in definition.required_identifiers:
+    if "user_id" not in definition.required_identifiers:
         return None
     supplied = arguments.get("user_id")
+    if not configured:
+        return Rejection(
+            "configuration_error",
+            f"microsoft365.{key}: a configured user_id is required for this user-scoped operation",
+        )
     if not isinstance(supplied, str) or not supplied.strip() or supplied.strip() != configured:
         return Rejection(
             "validation_error",
@@ -1088,9 +1093,6 @@ def check(settings: Settings | None, *, service: Any, arguments: Any) -> Rejecti
             f"microsoft365.{key} is disabled by the plugin configuration; enable "
             f"capabilities.{service}.{operation} to use it",
         )
-    boundary_rejection = _check_bound_user(settings, key, arguments)
-    if boundary_rejection is not None:
-        return boundary_rejection
     contract = ARGUMENT_CONTRACTS.get(key)
     if contract is None:
         # Unreachable while the contract table covers the registry (a test pins that); if it
@@ -1106,6 +1108,9 @@ def check(settings: Settings | None, *, service: Any, arguments: Any) -> Rejecti
         _validate_arguments(context, contract)
     except _Failure as failure:
         return Rejection("validation_error", f"microsoft365.{key}: {failure.detail}")
+    boundary_rejection = _check_bound_user(settings, key, arguments)
+    if boundary_rejection is not None:
+        return boundary_rejection
     return None
 
 

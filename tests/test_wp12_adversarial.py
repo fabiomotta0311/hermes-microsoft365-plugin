@@ -23,6 +23,7 @@ def _registered(capabilities=None):
         {
             "tenant_id": "tenant",
             "client_id": "client",
+            "user_id": USER,
             "authentication_mode": "application",
             "capabilities": capabilities or {service: True for service in SERVICES},
         }
