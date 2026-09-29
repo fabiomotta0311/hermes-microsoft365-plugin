@@ -39,6 +39,18 @@ def test_preflight_derives_identity_requirements_and_redacts_identifiers(monkeyp
     assert "user-a" not in json.dumps(result)
 
 
+def test_preflight_reports_missing_profile_user_for_user_scoped_selection(monkeypatch):
+    import agent.secret_scope
+    from microsoft365.preflight import build_preflight
+
+    monkeypatch.setattr(agent.secret_scope, "get_secret", lambda *args: "secret")
+    result = build_preflight(_settings(user_id=""), sdk_available=True)
+
+    assert result["requirements"]["user_id"] is True
+    assert result["missing"] == ["user_id"]
+    assert result["locally_ready"] is False
+
+
 def test_planner_only_preflight_does_not_require_user_or_secret_in_delegated_mode(monkeypatch):
     import agent.secret_scope
     from microsoft365.preflight import build_preflight
