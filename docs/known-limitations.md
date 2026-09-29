@@ -45,7 +45,9 @@ This document states the boundary of the first standalone milestone. It is not r
 
 ## Teams Graph
 
-- Teams Graph handlers are registered for `list_teams`, `list_channels`, `search_messages` and `send_messages`. The first two are implemented and executable in application mode through `users/{user_id}/joinedTeams` and `teams/{team_id}/channels`.
+- Teams Graph handlers are registered for `list_teams`, `list_channels`, `search_messages`, `send_messages`, `list_chats`, `read_chat_messages` and `send_chat_message`. The first two are implemented and executable in application mode through `users/{user_id}/joinedTeams` and `teams/{team_id}/channels`.
+- The individual-chat handlers use `GET /users/{user_id}/chats`, `GET /chats/{chat_id}/messages` and `POST /chats/{chat_id}/messages`. They preserve chat context via the caller-supplied `chat_id`, use shared pagination, and serialize real `ChatMessage`/`ItemBody` models.
+- `list_chats`, `read_chat_messages` and `send_chat_message` are deliberately delegated-only and remain inactive until delegated OAuth is implemented. `send_chat_message` is a write and remains subject to final-argument approval; no Bot Framework delivery/webhook is claimed by these Graph operations.
 - `joinedTeams` does not accept OData query parameters, and the channels endpoint does not accept `$top`; the handlers process returned collections within the shared item budget. Channels may use typed `$select`.
 - `search_messages` uses the generated `search/query` POST body (`QueryPostRequestBody` containing `SearchRequest`/`SearchQuery` for `chatMessage`), and `send_messages` uses a generated `ChatMessage` on the channel `messages` collection. Both remain delegated-only: application mode has no permission claim and dispatch refuses them before client or credential work; delegated scopes are recorded as `Chat.Read` + `ChannelMessage.Read.All` and `ChannelMessage.Send`, respectively.
 - Delegated authentication is not implemented until WP14, so delegated Teams operations are described in the matrix but are not executable. Bot Framework files (`plugins/platforms/teams` and `teams_pipeline`) are intentionally untouched.

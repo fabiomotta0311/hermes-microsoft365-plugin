@@ -60,7 +60,7 @@ SERVICES = ("outlook", "sharepoint", "onedrive", "calendar", "teams", "todo", "p
 #: The two Teams operations this plugin can only reach in delegated mode: in application mode
 #: the endpoint does not exist for an app-only token. They are covered by their own test
 #: instead of the happy-path table.
-APPLICATION_UNREACHABLE = ("teams.search_messages", "teams.send_messages")
+APPLICATION_UNREACHABLE = ("teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message")
 
 #: One known-good payload per operation that application mode can run today.
 VALID_PAYLOADS: dict[str, dict] = {
@@ -406,6 +406,9 @@ def test_application_roles_are_pinned_per_operation():
         "teams.list_channels": ("Channel.ReadBasic.All",),
         "teams.search_messages": (),
         "teams.send_messages": (),
+        "teams.list_chats": (),
+        "teams.read_chat_messages": (),
+        "teams.send_chat_message": (),
         "todo.list_task_lists": ("Tasks.Read.All",),
         "todo.search": ("Tasks.Read.All",),
         "todo.read": ("Tasks.Read.All",),
@@ -443,6 +446,9 @@ def test_delegated_scopes_are_recorded_independently_of_the_application_roles():
         "teams.list_channels": ("Channel.ReadBasic.All",),
         "teams.search_messages": ("Chat.Read", "ChannelMessage.Read.All"),
         "teams.send_messages": ("ChannelMessage.Send",),
+        "teams.list_chats": ("Chat.Read",),
+        "teams.read_chat_messages": ("Chat.Read",),
+        "teams.send_chat_message": ("ChatMessage.Send",),
         "todo.list_task_lists": ("Tasks.Read",),
         "todo.search": ("Tasks.Read",),
         "todo.read": ("Tasks.Read",),
@@ -619,11 +625,11 @@ def test_only_the_three_verified_reads_are_executable_and_every_handler_is_regis
     from microsoft365.contract import OPERATION_REGISTRY
     from microsoft365.registration import HANDLER_TABLE
 
-    assert len(OPERATION_REGISTRY) == 30
+    assert len(OPERATION_REGISTRY) == 33
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
-    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}
 
     for key, definition in OPERATION_REGISTRY.items():
         assert definition.executable is (key in EXECUTABLE_READS), key
@@ -634,9 +640,9 @@ def test_only_the_three_verified_reads_are_executable_and_every_handler_is_regis
             # implemented and withheld, never removed (invariant 14)
             assert key in HANDLER_TABLE, key
             assert definition.write is True, key
-        elif key in {"teams.search_messages", "teams.send_messages"}:
+        elif key in {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}:
             assert key in HANDLER_TABLE, key
-            assert definition.write is (key == "teams.send_messages"), key
+            assert definition.write is (key in {"teams.send_messages", "teams.send_chat_message"}), key
         else:
             assert key not in HANDLER_TABLE, key
         assert definition.endpoint == "; ".join(definition.endpoints), key
@@ -649,6 +655,7 @@ def test_only_the_three_verified_reads_are_executable_and_every_handler_is_regis
                 "create_events",
                 "update_events",
                 "send_messages",
+                "send_chat_message",
                 "create_tasks",
                 "update_tasks",
             }
@@ -692,7 +699,7 @@ def test_user_scoped_operations_require_a_real_user_id():
     assert USER_SCOPED_OPERATIONS == frozenset(
         key
         for key in OPERATION_REGISTRY
-        if key.split(".", 1)[0] in {"outlook", "calendar", "todo"} or key == "teams.list_teams"
+        if key.split(".", 1)[0] in {"outlook", "calendar", "todo"} or key in {"teams.list_teams", "teams.list_chats"}
     )
     for key, contract in ARGUMENT_CONTRACTS.items():
         user_id = next((spec for spec in contract.properties if spec.name == "user_id"), None)
@@ -1219,7 +1226,7 @@ def test_the_withheld_writes_keep_their_handler_and_the_reads_are_the_only_execu
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
-    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}
 
     for key in sorted(WITHHELD_WRITES):
         service, operation = key.split(".", 1)

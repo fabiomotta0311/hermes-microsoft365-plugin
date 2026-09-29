@@ -54,6 +54,7 @@ def build_collection_request_information(
     drive_id: str = "",
     drive_item_id: str = "",
     team_id: str = "",
+    chat_id: str = "",
     plan_id: str = "",
     owner_id: str = "",
     group_id: str | None = None,
@@ -96,6 +97,12 @@ def build_collection_request_information(
     if case == "teams_channels":
         builder = client.teams.by_team_id(_required(team_id, "team_id")).channels
         return _request(builder, select=["id", "displayName"])
+    if case == "teams_chats":
+        builder = client.users.by_user_id(_required(user_id, "user_id")).chats
+        return _request(builder, top=bounded)
+    if case == "teams_chat_messages":
+        builder = client.chats.by_chat_id(_required(chat_id, "chat_id")).messages
+        return _request(builder, top=bounded)
     if case == "planner_plans":
         if group_id is None:
             builder = client.planner.plans
@@ -414,6 +421,7 @@ def build_write_request_information(
     planner_task_id: str = "",
     team_id: str = "",
     channel_id: str = "",
+    chat_id: str = "",
     drive_id: str = "",
     drive_item_id: str = "",
     subject: str = "",
@@ -548,6 +556,13 @@ def build_write_request_information(
             .channels.by_channel_id(_required(channel_id, "channel_id"))
             .messages
         )
+        return builder.to_post_request_information(
+            ChatMessage(body=_item_body(content, content_type)),
+            RequestConfiguration(headers=_headers()),
+        )
+    if case == "teams_chat_send":
+        from msgraph.generated.models.chat_message import ChatMessage
+        builder = client.chats.by_chat_id(_required(chat_id, "chat_id")).messages
         return builder.to_post_request_information(
             ChatMessage(body=_item_body(content, content_type)),
             RequestConfiguration(headers=_headers()),

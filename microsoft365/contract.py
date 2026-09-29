@@ -9,14 +9,14 @@ OPERATIONS = {
     "sharepoint": ("search", "read", "download_files", "upload_files"),
     "onedrive": ("search", "read", "download_files", "upload_files"),
     "calendar": ("search", "create_events", "update_events"),
-    "teams": ("list_teams", "list_channels", "search_messages", "send_messages"),
+    "teams": ("list_teams", "list_channels", "search_messages", "send_messages", "list_chats", "read_chat_messages", "send_chat_message"),
     "todo": ("list_task_lists", "search", "read", "create_tasks", "update_tasks"),
     "planner": ("list_plans", "list_buckets", "list_tasks", "read", "create_tasks", "update_tasks"),
 }
 WRITE_OPERATIONS = frozenset(
     {
         "create_draft", "send", "upload_files", "create_events", "update_events",
-        "send_messages", "create_tasks", "update_tasks",
+        "send_messages", "send_chat_message", "create_tasks", "update_tasks",
     }
 )
 
@@ -647,8 +647,9 @@ def todo_write_support(key: str) -> ApplicationWriteSupport:
 _PERMISSION_MAP = {
     "teams.list_teams": ("Team.ReadBasic.All",), "teams.list_channels": ("Channel.ReadBasic.All",),
     "teams.search_messages": (), "teams.send_messages": (),
+    "teams.list_chats": (), "teams.read_chat_messages": (), "teams.send_chat_message": (),
 }
-_UNSUPPORTED_APPLICATION = frozenset({"teams.search_messages", "teams.send_messages"})
+_UNSUPPORTED_APPLICATION = frozenset({"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"})
 
 
 # --------------------------------------------------------------------------------------
@@ -1104,15 +1105,29 @@ TEAMS_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         contract_call="build_write_request_information",
     ),
     MessagingEndpoint(
-        service="teams",
-        operation="send_messages",
-        method="POST",
-        path_template="/teams/{team_id}/channels/{channel_id}/messages",
-        container="channel",
-        path_identifiers=("team_id", "channel_id"),
-        contract_case="teams_send_messages",
+        service="teams", operation="send_messages", method="POST",
+        path_template="/teams/{team_id}/channels/{channel_id}/messages", container="channel",
+        path_identifiers=("team_id", "channel_id"), contract_case="teams_send_messages",
         documentation_page="https://learn.microsoft.com/en-us/graph/api/channel-post-messages",
         contract_call="build_write_request_information",
+    ),
+    MessagingEndpoint(
+        service="teams", operation="list_chats", method="GET",
+        path_template="/users/{user_id}/chats", container="user",
+        path_identifiers=("user_id",), contract_call="build_collection_request_information",
+        contract_case="teams_chats", documentation_page="https://learn.microsoft.com/en-us/graph/api/chat-list",
+    ),
+    MessagingEndpoint(
+        service="teams", operation="read_chat_messages", method="GET",
+        path_template="/chats/{chat_id}/messages", container="chat",
+        path_identifiers=("chat_id",), contract_call="build_collection_request_information",
+        contract_case="teams_chat_messages", documentation_page="https://learn.microsoft.com/en-us/graph/api/chat-list-messages",
+    ),
+    MessagingEndpoint(
+        service="teams", operation="send_chat_message", method="POST",
+        path_template="/chats/{chat_id}/messages", container="chat",
+        path_identifiers=("chat_id",), contract_call="build_write_request_information",
+        contract_case="teams_chat_send", documentation_page="https://learn.microsoft.com/en-us/graph/api/chat-post-messages",
     ),
 )
 TEAMS_OPERATIONS: tuple[str, ...] = tuple(f"teams.{row.operation}" for row in TEAMS_ENDPOINTS)
@@ -1206,6 +1221,9 @@ _DELEGATED_SCOPES: dict[str, tuple[str, ...]] = {
     "teams.list_channels": ("Channel.ReadBasic.All",),
     "teams.search_messages": ("Chat.Read", "ChannelMessage.Read.All"),
     "teams.send_messages": ("ChannelMessage.Send",),
+    "teams.list_chats": ("Chat.Read",),
+    "teams.read_chat_messages": ("Chat.Read",),
+    "teams.send_chat_message": ("ChatMessage.Send",),
     "todo.list_task_lists": ("Tasks.Read",),
     "todo.search": ("Tasks.Read",),
     "todo.read": ("Tasks.Read",),

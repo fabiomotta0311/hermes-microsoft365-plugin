@@ -13,7 +13,8 @@ This is a conservative pre-release matrix for local administrative reporting. It
 | Calendar search/create/update | `Calendars.Read` / `Calendars.ReadWrite` | supported | not implemented |
 | Teams list teams/channels | `Team.ReadBasic.All` / `Channel.ReadBasic.All` | supported | not implemented |
 | Teams message search | none claimed | unsupported auth mode | requires delegated implementation |
-| Teams send message | none claimed | unsupported auth mode | requires delegated implementation |
+| Teams 1:1 chat list/read | none claimed | unsupported auth mode | `Chat.Read`, requires delegated implementation |
+| Teams 1:1 chat send | none claimed | unsupported auth mode | `ChatMessage.Send`, requires delegated implementation |
 | To Do (5 operations) | endpoint-specific, see "Microsoft To Do endpoint claims" | reads supported, writes `not_verified` | not implemented |
 | Planner (6 operations) | endpoint-specific, see "Planner endpoint claims" | contract verified offline, not executable | not implemented |
 

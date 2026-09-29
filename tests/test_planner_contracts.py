@@ -608,7 +608,7 @@ def test_no_planner_operation_is_executable_while_its_handler_does_not_exist():
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
-    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}
 
 
 def test_implementation_status_labels_are_explicit_and_backed_by_declared_evidence():

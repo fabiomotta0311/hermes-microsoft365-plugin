@@ -7,7 +7,7 @@ EXPECTED_OPERATIONS = {
     "sharepoint": ("search", "read", "download_files", "upload_files"),
     "onedrive": ("search", "read", "download_files", "upload_files"),
     "calendar": ("search", "create_events", "update_events"),
-    "teams": ("list_teams", "list_channels", "search_messages", "send_messages"),
+    "teams": ("list_teams", "list_channels", "search_messages", "send_messages", "list_chats", "read_chat_messages", "send_chat_message"),
     "todo": ("list_task_lists", "search", "read", "create_tasks", "update_tasks"),
     "planner": ("list_plans", "list_buckets", "list_tasks", "read", "create_tasks", "update_tasks"),
 }
@@ -152,7 +152,7 @@ def test_application_support_status_is_recorded_per_operation():
         for key, definition in OPERATION_REGISTRY.items()
         if definition.app.status == "unsupported_auth_mode"
     }
-    assert unsupported == {"teams.search_messages", "teams.send_messages"}
+    assert unsupported == {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}
     not_verified = {
         key for key, definition in OPERATION_REGISTRY.items() if definition.app.status == "not_verified"
     }

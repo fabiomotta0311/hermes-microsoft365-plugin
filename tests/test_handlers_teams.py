@@ -7,6 +7,10 @@ from urllib.parse import urlsplit
 import pytest
 from msgraph.generated.models.channel import Channel
 from msgraph.generated.models.channel_collection_response import ChannelCollectionResponse
+from msgraph.generated.models.chat import Chat
+from msgraph.generated.models.chat_collection_response import ChatCollectionResponse
+from msgraph.generated.models.chat_message import ChatMessage
+from msgraph.generated.models.chat_message_collection_response import ChatMessageCollectionResponse
 from msgraph.generated.models.entity_type import EntityType
 from msgraph.generated.models.team import Team
 from msgraph.generated.models.team_collection_response import TeamCollectionResponse
@@ -27,7 +31,7 @@ def all_selected_settings(**overrides) -> Settings:
 
 def test_all_teams_handlers_are_registered_but_only_application_reads_are_active():
     assert {key for key in HANDLER_TABLE if key.startswith("teams.")} == {
-        "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages"
+        "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"
     }
     assert active_actions(all_selected_settings(), TEAMS) == ("list_teams", "list_channels")
 
@@ -106,9 +110,38 @@ def test_send_messages_builds_chat_message_on_channel_messages():
     assert serialized(request) == {"body": {"content": "hello", "contentType": "text"}}
 
 
+def test_list_chats_reads_user_chat_collection():
+    response = ChatCollectionResponse(value=[Chat(id="chat-1", topic="Support")])
+    adapter = HandlerGraphAdapter({("GET", "/users/user/chats"): response})
+    payload = invocation("teams.list_chats")({"user_id": "user", "top": 10}, open_context(adapter))
+    assert urlsplit(adapter.requests[0].url).path == "/users/user/chats"
+    assert payload["result"]["value"][0]["id"] == "chat-1"
+
+
+def test_read_chat_messages_reads_the_chat_message_collection():
+    response = ChatMessageCollectionResponse(value=[ChatMessage(id="message-1")])
+    adapter = HandlerGraphAdapter({("GET", "/chats/chat-1/messages"): response})
+    payload = invocation("teams.read_chat_messages")({"chat_id": "chat-1", "top": 10}, open_context(adapter))
+    assert urlsplit(adapter.requests[0].url).path == "/chats/chat-1/messages"
+    assert payload["result"]["value"][0]["id"] == "message-1"
+
+
+def test_send_chat_message_posts_to_chat_messages_collection():
+    adapter = HandlerGraphAdapter({("POST", "/chats/chat-1/messages"): {}})
+    invocation("teams.send_chat_message")(
+        {"chat_id": "chat-1", "body": "hello"}, open_context(adapter)
+    )
+    request = adapter.requests[0]
+    assert urlsplit(request.url).path == "/chats/chat-1/messages"
+    assert serialized(request) == {"body": {"content": "hello", "contentType": "text"}}
+
+
 @pytest.mark.parametrize("operation, arguments", [
     ("search_messages", {"query": "incident"}),
     ("send_messages", {"team_id": "team-1", "channel_id": "channel-1", "body": "hello"}),
+    ("list_chats", {"user_id": "user"}),
+    ("read_chat_messages", {"chat_id": "chat-1"}),
+    ("send_chat_message", {"chat_id": "chat-1", "body": "hello"}),
 ])
 def test_application_dispatch_refuses_delegated_only_teams_operations_before_client(operation, arguments):
     called = False

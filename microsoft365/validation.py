@@ -159,6 +159,7 @@ USER_SCOPED_OPERATIONS = frozenset(
         "calendar.create_events",
         "calendar.update_events",
         "teams.list_teams",
+        "teams.list_chats",
         "todo.list_task_lists",
         "todo.search",
         "todo.read",
@@ -499,6 +500,22 @@ def _build_contracts() -> dict[str, OperationArguments]:
             properties=(
                 _spec("team_id", "identifier", required=True),
                 _spec("channel_id", "identifier", required=True),
+                _spec("body", "text", max_length=MAX_TEXT_LENGTH, required=True),
+                _spec("content_type", "enum", values=("text", "html")),
+            ),
+        ),
+        "teams.list_chats": OperationArguments(
+            key="teams.list_chats",
+            properties=(_spec("user_id", "identifier", required=True), _integer("top", 1, 100)),
+        ),
+        "teams.read_chat_messages": OperationArguments(
+            key="teams.read_chat_messages",
+            properties=(_spec("chat_id", "identifier", required=True), _integer("top", 1, 100)),
+        ),
+        "teams.send_chat_message": OperationArguments(
+            key="teams.send_chat_message",
+            properties=(
+                _spec("chat_id", "identifier", required=True),
                 _spec("body", "text", max_length=MAX_TEXT_LENGTH, required=True),
                 _spec("content_type", "enum", values=("text", "html")),
             ),

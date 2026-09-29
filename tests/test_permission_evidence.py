@@ -61,5 +61,5 @@ def test_unsupported_teams_application_operations_remain_claim_free():
 
 
 def test_all_thirty_operations_are_present_in_the_evidence_matrix():
-    assert len(OPERATION_REGISTRY) == 30
+    assert len(OPERATION_REGISTRY) == 33
     assert {endpoint_key(row) for row in ALL_ENDPOINTS} == set(OPERATION_REGISTRY)

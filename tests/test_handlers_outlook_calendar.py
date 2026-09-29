@@ -1500,7 +1500,7 @@ def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
     """One source of dispatch truth: ``HANDLER_TABLE`` is the self-populating registry."""
     from microsoft365.registration import HANDLER_TABLE
 
-    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS) | {"teams.search_messages", "teams.send_messages", "todo.list_task_lists", "todo.search", "todo.read", "todo.create_tasks", "todo.update_tasks", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read", "planner.create_tasks", "planner.update_tasks"}
+    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS) | {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message", "todo.list_task_lists", "todo.search", "todo.read", "todo.create_tasks", "todo.update_tasks", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read", "planner.create_tasks", "planner.update_tasks"}
     for key in sorted(IMPLEMENTED_OPERATIONS):
         assert callable(HANDLER_TABLE[key]), key
 

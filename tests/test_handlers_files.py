@@ -229,7 +229,7 @@ def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
     implemented = {
         "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send",
         "calendar.search", "calendar.create_events", "calendar.update_events",
-        "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages",
+        "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message",
     } | set(WP7_HANDLERS)
     assert set(HANDLER_TABLE) == implemented | {"todo.list_task_lists", "todo.search", "todo.read", "todo.create_tasks", "todo.update_tasks", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read", "planner.create_tasks", "planner.update_tasks"}
     for key in sorted(WP7_HANDLERS):

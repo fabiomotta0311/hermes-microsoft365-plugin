@@ -37,6 +37,9 @@ LIST_TEAMS = "teams.list_teams"
 LIST_CHANNELS = "teams.list_channels"
 SEARCH_MESSAGES = "teams.search_messages"
 SEND_MESSAGES = "teams.send_messages"
+LIST_CHATS = "teams.list_chats"
+READ_CHAT_MESSAGES = "teams.read_chat_messages"
+SEND_CHAT_MESSAGE = "teams.send_chat_message"
 
 
 def _body(arguments: Mapping, *, operation: str) -> ItemBody:
@@ -114,3 +117,31 @@ def send_messages(arguments: Mapping, context: HandlerContext) -> dict:
     builder = client.teams.by_team_id(team_id).channels.by_channel_id(channel_id).messages
     response = execute_request(builder, method="POST", body=ChatMessage(body=body), adapter=adapter)
     return success_payload(SEND_MESSAGES, response)
+
+
+@handler("teams", "list_chats")
+def list_chats(arguments: Mapping, context: HandlerContext) -> dict:
+    user_id = identifier(arguments, "user_id", operation=LIST_CHATS)
+    client, adapter = open_graph_client(context)
+    builder = client.users.by_user_id(user_id).chats
+    paged = paginate(builder, adapter=adapter, limit=item_budget(arguments, operation=LIST_CHATS))
+    return collection_payload(LIST_CHATS, paged)
+
+
+@handler("teams", "read_chat_messages")
+def read_chat_messages(arguments: Mapping, context: HandlerContext) -> dict:
+    chat_id = identifier(arguments, "chat_id", operation=READ_CHAT_MESSAGES)
+    client, adapter = open_graph_client(context)
+    builder = client.chats.by_chat_id(chat_id).messages
+    paged = paginate(builder, adapter=adapter, limit=item_budget(arguments, operation=READ_CHAT_MESSAGES))
+    return collection_payload(READ_CHAT_MESSAGES, paged)
+
+
+@handler("teams", "send_chat_message")
+def send_chat_message(arguments: Mapping, context: HandlerContext) -> dict:
+    chat_id = identifier(arguments, "chat_id", operation=SEND_CHAT_MESSAGE)
+    body = _body(arguments, operation=SEND_CHAT_MESSAGE)
+    client, adapter = open_graph_client(context)
+    builder = client.chats.by_chat_id(chat_id).messages
+    response = execute_request(builder, method="POST", body=ChatMessage(body=body), adapter=adapter)
+    return success_payload(SEND_CHAT_MESSAGE, response)
