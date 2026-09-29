@@ -638,7 +638,7 @@ def test_operation_status_exposes_the_reads_and_withholds_every_upload():
         application = operation_status("application", service, operation)
         assert application.auth_status == "supported", key
         assert application.executable is (key in WP7_EXECUTABLE), key
-        assert operation_status("delegated", service, operation).executable is False, key
+        assert operation_status("delegated", service, operation).executable is (key in WP7_EXECUTABLE), key
 
 
 def test_uploads_stay_out_of_the_model_facing_schema():

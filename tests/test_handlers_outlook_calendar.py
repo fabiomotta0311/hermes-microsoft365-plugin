@@ -1492,8 +1492,7 @@ def test_operation_status_exposes_the_reads_and_withholds_every_write():
         application = operation_status("application", service, operation)
         assert application.auth_status == ("not_verified" if key in {"todo.create_tasks", "todo.update_tasks"} else "supported"), key
         assert application.executable is (key in EXECUTABLE_OPERATIONS), key
-        # delegated authentication is not implemented (WP14), so nothing runs there
-        assert operation_status("delegated", service, operation).executable is False, key
+        assert operation_status("delegated", service, operation).executable is (key in EXECUTABLE_OPERATIONS), key
 
 
 def test_the_dispatch_table_is_exactly_the_implemented_handler_set():

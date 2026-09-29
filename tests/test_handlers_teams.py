@@ -42,7 +42,7 @@ def test_application_and_delegated_statuses_are_explicit_and_honest():
         delegated = operation_status("delegated", TEAMS, operation)
         assert app.auth_status == "unsupported_auth_mode"
         assert not app.executable
-        assert delegated.auth_status == "not_implemented"
+        assert delegated.auth_status == "supported"
         assert delegated.reason
     assert OPERATION_REGISTRY["teams.search_messages"].delegated.permissions == (
         "Chat.Read", "ChannelMessage.Read.All"

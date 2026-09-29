@@ -1007,7 +1007,7 @@ def test_seam_still_wraps_an_unknown_factory_failure_as_authentication_required(
 # ---------------------------------------------------------------------------------------
 
 
-def test_client_rejects_delegated_mode_as_unsupported_auth_mode(monkeypatch):
+def test_client_delegated_mode_requires_oauth_client_configuration(monkeypatch):
     import agent.secret_scope
 
     from microsoft365.client import create_graph_client
@@ -1018,9 +1018,9 @@ def test_client_rejects_delegated_mode_as_unsupported_auth_mode(monkeypatch):
     )
 
     with pytest.raises(taxonomy.GraphError) as caught:
-        create_graph_client(Settings(authentication_mode="delegated", tenant_id="t", client_id="c"))
+        create_graph_client(Settings(authentication_mode="delegated", tenant_id="", client_id=""))
 
-    assert caught.value.category == "unsupported_auth_mode"
+    assert caught.value.category == "configuration_error"
 
 
 def test_client_requires_identity_configuration_before_reading_the_secret(monkeypatch):
@@ -1095,3 +1095,31 @@ def test_client_never_puts_the_secret_in_its_reported_error(monkeypatch):
     assert captured[0]["client_secret"] == SENTINEL
     # The value is consumed by the SDK and never rendered by the plugin.
     assert SENTINEL not in str(taxonomy.MESSAGES["authentication_required"])
+
+
+def test_client_builds_delegated_device_code_client_with_selected_scopes(monkeypatch):
+    import azure.identity
+    import msgraph
+
+    from microsoft365.client import create_graph_client
+    from microsoft365.contract import Settings
+
+    captured = {}
+
+    def capture(name, value):
+        captured[name] = value
+        return name
+
+    monkeypatch.setattr(azure.identity, "TokenCachePersistenceOptions", lambda **kwargs: capture("cache", kwargs))
+    monkeypatch.setattr(azure.identity, "DeviceCodeCredential", lambda **kwargs: capture("credential", kwargs))
+    monkeypatch.setattr(msgraph, "GraphServiceClient", lambda **kwargs: capture("client", kwargs))
+
+    result = create_graph_client(Settings(
+        authentication_mode="delegated", tenant_id="tenant", client_id="client",
+        capabilities={"outlook": {"search": True}},
+    ))
+
+    assert result == "client"
+    assert captured["cache"]["allow_unencrypted_storage"] is False
+    assert captured["credential"]["cache_persistence_options"] == "cache"
+    assert captured["client"]["scopes"] == ["openid", "profile", "offline_access", "Mail.Read"]

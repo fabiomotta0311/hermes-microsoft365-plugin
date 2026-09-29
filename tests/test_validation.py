@@ -247,7 +247,7 @@ INVALID_CALLS: tuple[tuple[str, str, object, str, str], ...] = (
     ("disabled operation", "outlook", {"action": "read", "user_id": USER, "message_id": "M"}, "validation_error", "disabled_read"),
     ("teams search in application mode", "teams", {"action": "search_messages", "query": "hello"}, "unsupported_auth_mode", "application"),
     ("teams channel message in application mode", "teams", {"action": "send_messages", "team_id": TEAM, "channel_id": CHANNEL, "body": "hi"}, "unsupported_auth_mode", "application"),
-    ("valid payload in delegated mode", "outlook", {"action": "search", "user_id": USER}, "unsupported_auth_mode", "delegated"),
+    ("valid payload in delegated mode", "outlook", {"action": "search", "user_id": USER}, None, "delegated"),
     ("unknown mode", "outlook", {"action": "search", "user_id": USER}, "unsupported_auth_mode", "hybrid"),
 )
 
@@ -331,7 +331,7 @@ def _registered(mode: str = "application", *, capabilities=None, monkeypatch=Non
         from microsoft365.contract import OPERATIONS
 
         def simulated_active_actions(settings, service):
-            if settings.authentication_mode != "application":
+            if settings.authentication_mode not in {"application", "delegated"}:
                 return ()
             selected = settings.selected(service)
             return tuple(operation for operation in OPERATIONS[service] if operation in selected)
@@ -542,7 +542,7 @@ def test_admin_consent_and_remote_verification_are_derived_and_fail_closed():
         OperationDefinition,
     )
 
-    assert IMPLEMENTED_AUTH_MODES == frozenset({"application"})
+    assert IMPLEMENTED_AUTH_MODES == frozenset({"application", "delegated"})
     assert REMOTE_VERIFICATION_STATUSES == frozenset({"not_tested", "verified"})
 
     for key, definition in OPERATION_REGISTRY.items():
@@ -586,11 +586,7 @@ def test_operation_status_is_derived_from_the_mode_matrix():
             assert status.auth_status == support.status, (key, mode)
             assert status.reason == support.reason, (key, mode)
             assert status.implementation_status == definition.implementation_status, (key, mode)
-            # executability is the registry flag *and* an available mode: the three verified
-            # reads run in application mode, nothing runs in the unimplemented delegated mode
-            assert status.executable is (
-                mode == "application" and (key in EXECUTABLE_READS or key in {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"})
-            ), (key, mode)
+            assert status.executable is (key in EXECUTABLE_READS or key in {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}), (key, mode)
 
     unknown = operation_status("application", "outlook", "delete")
     assert unknown.auth_status == "unknown_operation"
@@ -598,7 +594,7 @@ def test_operation_status_is_derived_from_the_mode_matrix():
     assert operation_status("hybrid", "outlook", "search").auth_status == "not_implemented"
     assert operation_status("application", "teams", "search_messages").auth_status == "unsupported_auth_mode"
     assert operation_status("application", "todo", "create_tasks").auth_status == "not_verified"
-    assert operation_status("delegated", "outlook", "search").auth_status == "not_implemented"
+    assert operation_status("delegated", "outlook", "search").auth_status == "supported"
 
 
 def test_the_two_teams_operations_are_unsupported_in_application_mode():
@@ -610,11 +606,11 @@ def test_the_two_teams_operations_are_unsupported_in_application_mode():
         assert definition.app.permissions == (), key
         assert definition.app.permission_status == "no_permission_claimed", key
         assert definition.delegated.permissions, key
-        assert definition.delegated.status == "not_implemented", key
+        assert definition.delegated.status == "supported", key
         assert "delegated" in definition.delegated.reason, key
         service, operation = key.split(".", 1)
         assert operation_status("application", service, operation).auth_status == "unsupported_auth_mode"
-        assert operation_status("delegated", service, operation).auth_status == "not_implemented"
+        assert operation_status("delegated", service, operation).auth_status == "supported"
 
 
 def test_only_the_three_verified_reads_are_executable_and_every_handler_is_registered():
@@ -799,6 +795,9 @@ def test_every_invalid_payload_is_rejected_with_the_expected_category(
 ):
     rejection = _check(service, payload, mode=mode)
 
+    if expected_category is None:
+        assert rejection is None, label
+        return
     assert rejection is not None, label
     assert rejection.category == expected_category, label
     assert rejection.message, label
@@ -1005,14 +1004,10 @@ def test_naive_timestamp_is_accepted_when_the_operation_carries_a_time_zone():
     assert accepted is None
 
 
-def test_delegated_mode_is_refused_as_unsupported_until_it_exists():
+def test_delegated_mode_is_accepted_after_oauth_configuration():
     from microsoft365.validation import check
 
-    rejection = check(_settings("delegated"), service="outlook", arguments={"action": "search", "user_id": USER})
-
-    assert rejection is not None
-    assert rejection.category == "unsupported_auth_mode"
-    assert "delegated" in rejection.message
+    assert check(_settings("delegated"), service="outlook", arguments={"action": "search", "user_id": USER}) is None
     assert check(_settings("application"), service="outlook", arguments={"action": "search", "user_id": USER}) is None
 
 
@@ -1071,6 +1066,10 @@ def test_hook_and_dispatch_reject_identically(monkeypatch, label, service, paylo
 
     directive = ctx.hooks["pre_tool_call"](tool_name=tool_name, args=payload)
 
+    if expected_category is None:
+        assert expected is None, label
+        assert directive is None, label
+        return
     assert directive is not None and directive["action"] == "block", label
     assert expected is not None and expected.category == expected_category, label
     assert directive["message"] == expected.message, label
@@ -1332,6 +1331,9 @@ def test_invalid_arguments_never_touch_secret_credential_or_client(monkeypatch):
         ctx = contexts[mode]
         tool_name = f"microsoft365_{service}"
         directive = ctx.hooks["pre_tool_call"](tool_name=tool_name, args=payload)
+        if expected_category is None:
+            assert directive is None, label
+            continue
         assert directive is not None and directive["action"] == "block", label
 
         tool = ctx.tools.get(tool_name)

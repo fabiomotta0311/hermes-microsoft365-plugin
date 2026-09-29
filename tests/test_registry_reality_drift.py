@@ -34,9 +34,9 @@ def test_registry_executable_set_is_exact_and_writes_are_withheld():
     assert not set(active_actions(settings, "planner")) & WRITE_OPERATIONS
 
 
-def test_delegated_mode_is_not_implemented_for_new_reads():
+def test_delegated_mode_supports_new_reads():
     from microsoft365.contract import operation_status
     for service, operation in (("todo", "read"), ("planner", "read")):
         status = operation_status("delegated", service, operation)
-        assert status.executable is False
-        assert status.auth_status == "not_implemented"
+        assert status.executable is True
+        assert status.auth_status == "supported"

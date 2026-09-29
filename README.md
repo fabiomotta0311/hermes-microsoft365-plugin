@@ -66,7 +66,7 @@ This does **not** verify tenant authentication, consent, endpoint permissions, t
 
 See [Known limitations](docs/known-limitations.md). In particular:
 
-- delegated authentication is not implemented;
+- delegated authentication uses Azure Identity device-code OAuth with an OS-protected persistent token cache;
 - operations without strict executable contracts stay in preflight as `not_implemented` or `not_verified` and are not model-facing;
 - no workaround is included for the Hermes host approval modification-order defect; safe write execution depends on the separate generic core fix;
 - the catalog entry is proposed in PR #114530 and remains pending upstream admission; this pre-release makes no tenant or production-support claim.

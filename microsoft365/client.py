@@ -7,11 +7,45 @@ credential) is chained as ``__cause__`` and is not part of the message.
 """
 from __future__ import annotations
 
-from .contract import Settings
+from .contract import Settings, delegated_scopes
 from .errors import MESSAGES, GraphError
 from .preflight import SECRET_ENV_NAME
 
 GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default"
+DELEGATED_CACHE_NAME = "hermes-microsoft365"
+DELEGATED_BASE_SCOPES = ("openid", "profile", "offline_access")
+
+
+def _delegated_client(settings: Settings):
+    """Build a delegated Graph client using device-code OAuth and OS-protected cache.
+
+    Device-code interaction is intentionally owned by Azure Identity; the plugin never
+    handles passwords, refresh tokens, or access tokens. The persistent cache is encrypted
+    by the platform broker when available and unencrypted fallback is refused.
+    """
+    if not settings.tenant_id or not settings.client_id:
+        raise _failure("configuration_error")
+    scopes = tuple(dict.fromkeys((*DELEGATED_BASE_SCOPES, *delegated_scopes(settings))))
+    if not scopes:
+        raise _failure("configuration_error")
+    from azure.identity import DeviceCodeCredential, TokenCachePersistenceOptions
+    from msgraph import GraphServiceClient
+
+    try:
+        cache = TokenCachePersistenceOptions(
+            name=DELEGATED_CACHE_NAME,
+            allow_unencrypted_storage=False,
+        )
+        credential = DeviceCodeCredential(
+            tenant_id=settings.tenant_id,
+            client_id=settings.client_id,
+            cache_persistence_options=cache,
+        )
+        return GraphServiceClient(credentials=credential, scopes=list(scopes))
+    except GraphError:
+        raise
+    except Exception as exc:
+        raise _failure("authentication_required", exc)
 
 
 def _failure(category: str, cause: BaseException | None = None) -> GraphError:
@@ -30,6 +64,8 @@ def create_graph_client(settings: Settings):
     ``authentication_required`` when no secret is available or the credential cannot be
     constructed.
     """
+    if settings.authentication_mode == "delegated":
+        return _delegated_client(settings)
     if settings.authentication_mode != "application":
         raise _failure("unsupported_auth_mode")
     if not settings.tenant_id or not settings.client_id:

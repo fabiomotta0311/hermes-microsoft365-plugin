@@ -1159,11 +1159,9 @@ def teams_endpoints(key: str) -> tuple[MessagingEndpoint, ...]:
 #: The authentication modes this plugin records support for.
 AUTH_MODES = frozenset({"application", "delegated"})
 
-#: The modes this plugin actually implements. Delegated is fully described in the matrix
-#: (status, scopes, admin consent) but no delegated authentication flow exists yet (WP14), so
-#: every delegated record resolves to ``not_implemented``: authentication is not implemented
-#: for that mode, which is a different statement from an operation being unavailable in it.
-IMPLEMENTED_AUTH_MODES = frozenset({"application"})
+#: The authentication modes this plugin implements. Delegated OAuth uses Azure Identity's
+#: device-code flow and OS-protected persistent token cache; credentials remain outside the plugin.
+IMPLEMENTED_AUTH_MODES = frozenset({"application", "delegated"})
 
 #: What a mode-level support status is allowed to mean.
 MODE_SUPPORT_STATUSES = frozenset(
@@ -1188,10 +1186,10 @@ APPLICATION_CONSENT_BASIS = (
     "so nothing an application-mode call needs can be consented to by a user"
 )
 
-#: Why a delegated scope is reported as requiring consent while delegated is not implemented.
+#: Why a delegated scope is reported as requiring consent before the tenant confirms it.
 UNVERIFIED_DELEGATED_CONSENT_BASIS = (
-    "the delegated consent record was not re-read offline and delegated authentication is "
-    "not implemented (R10; WP14), so consent is reported as required until it is recorded"
+    "the delegated scope is recorded but tenant consent has not been verified (R10), "
+    "so consent is reported as required until it is recorded"
 )
 
 #: Why an operation with no claimed permission has nothing to consent to.
@@ -1238,6 +1236,17 @@ _DELEGATED_SCOPES: dict[str, tuple[str, ...]] = {
     "planner.create_tasks": ("Tasks.ReadWrite",),
     "planner.update_tasks": ("Tasks.ReadWrite",),
 }
+
+
+def delegated_scopes(settings: "Settings") -> tuple[str, ...]:
+    """Return the least-privileged delegated scopes for enabled operations."""
+    selected = (
+        f"{service}.{operation}"
+        for service, operations in settings.capabilities.items()
+        for operation, enabled in operations.items()
+        if enabled
+    )
+    return tuple(dict.fromkeys(scope for key in selected for scope in _DELEGATED_SCOPES[key]))
 
 
 @dataclass(frozen=True)
@@ -1377,12 +1386,7 @@ def _application_mode_support(key: str) -> ModeSupport:
 
 
 def _delegated_mode_support(key: str) -> ModeSupport:
-    """Delegated support of one operation: scopes recorded, mode not implemented yet.
-
-    The status is ``not_implemented`` while ``delegated`` is absent from
-    :data:`IMPLEMENTED_AUTH_MODES`, so recording scopes cannot advertise a mode the plugin
-    cannot perform. Only WP14 may add the mode, and it does so in one place.
-    """
+    """Return delegated OAuth support and its least-privileged scopes."""
     scopes = _DELEGATED_SCOPES[key]
     implemented = "delegated" in IMPLEMENTED_AUTH_MODES
     unavailable = key in _UNSUPPORTED_APPLICATION
@@ -1394,12 +1398,12 @@ def _delegated_mode_support(key: str) -> ModeSupport:
         admin_consent=True,
         admin_consent_basis=UNVERIFIED_DELEGATED_CONSENT_BASIS,
         reason=(
-            "delegated authentication is not implemented (WP14); this operation is only "
-            "available in delegated mode, the scopes below are the ones it will need"
+            "delegated OAuth is available through device-code authentication; this operation is "
+            "only available in delegated mode, and the scopes below are the ones it needs"
             if unavailable
             else (
-                "delegated authentication is not implemented (WP14); the scopes below are the "
-                "ones this operation will need"
+                "delegated OAuth is available through device-code authentication; the scopes below "
+                "are the ones this operation needs"
             )
         ),
     )
@@ -1538,7 +1542,7 @@ def _teams_definition(key: str) -> OperationDefinition:
 
     Search and send are retained in the administrative registry with their delegated scopes,
     but application mode has no permission claim for either endpoint and therefore refuses them
-    before client construction. Delegated authentication remains not implemented until WP14.
+    before client construction. Delegated authentication is implemented through Azure Identity device-code OAuth with an OS-protected token cache.
     """
     return _endpoint_backed_definition(
         service="teams",
@@ -1616,12 +1620,9 @@ class ConfigurationError(ValueError):
 def operation_status(auth_mode: str, service: str, operation: str) -> OperationStatus:
     """The honest status of one operation in one authentication mode, read from the matrix.
 
-    The verdict is the operation's own mode support record (WP13): ``unsupported_auth_mode``
-    when the mode cannot reach the endpoint at all, ``not_implemented`` when the authentication
-    mode itself is not implemented (delegated, WP14), ``not_verified`` when the mode's
-    permission for the endpoint is unverified, ``supported`` when the mode is available. A
-    supported mode still never implies execution: ``executable`` stays whatever the registry
-    declares, so support and executability cannot be conflated.
+    The verdict is the operation's own mode support record: ``unsupported_auth_mode`` when
+    the mode cannot reach the endpoint, ``not_verified`` when its permission is unverified,
+    and ``supported`` when the mode is available.
     """
     key = f"{service}.{operation}"
     definition = OPERATION_REGISTRY.get(key)

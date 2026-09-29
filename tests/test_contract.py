@@ -59,7 +59,7 @@ def test_application_auth_matrix_keeps_unsupported_and_unverified_explicit():
     assert operation_status("application", "teams", "send_messages").auth_status == "unsupported_auth_mode"
     assert operation_status("application", "todo", "create_tasks").auth_status == "not_verified"
     assert operation_status("application", "outlook", "search").auth_status == "supported"
-    assert operation_status("delegated", "outlook", "search").auth_status == "not_implemented"
+    assert operation_status("delegated", "outlook", "search").auth_status == "supported"
 
 
 def test_capabilities_accept_only_real_booleans_and_known_names():
@@ -162,4 +162,4 @@ def test_application_support_status_is_recorded_per_operation():
         if definition.app.status not in {"unsupported_auth_mode", "not_verified"}:
             assert definition.app.status == "supported", key
             assert definition.app.permissions, key
-        assert definition.delegated.status == "not_implemented", key
+        assert definition.delegated.status == "supported", key
