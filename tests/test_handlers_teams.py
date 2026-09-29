@@ -25,7 +25,7 @@ TEAMS = "teams"
 
 def all_selected_settings(**overrides) -> Settings:
     capabilities = {service: True for service in OPERATIONS}
-    capabilities[TEAMS] = {"list_teams": True, "list_channels": True, "search_messages": True, "send_messages": True}
+    capabilities[TEAMS] = {"list_teams": True, "list_channels": True, "search_messages": True, "send_messages": True, "list_chats": True, "read_chat_messages": True, "send_chat_message": True}
     return Settings.from_mapping({"tenant_id": "tenant", "client_id": "client", "capabilities": capabilities, **overrides})
 
 
@@ -33,7 +33,7 @@ def test_all_teams_handlers_are_registered_but_only_application_reads_are_active
     assert {key for key in HANDLER_TABLE if key.startswith("teams.")} == {
         "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"
     }
-    assert active_actions(all_selected_settings(), TEAMS) == ("list_teams", "list_channels")
+    assert active_actions(all_selected_settings(), TEAMS) == ("list_teams", "list_channels", "list_chats", "read_chat_messages")
 
 
 def test_application_and_delegated_statuses_are_explicit_and_honest():
@@ -139,8 +139,6 @@ def test_send_chat_message_posts_to_chat_messages_collection():
 @pytest.mark.parametrize("operation, arguments", [
     ("search_messages", {"query": "incident"}),
     ("send_messages", {"team_id": "team-1", "channel_id": "channel-1", "body": "hello"}),
-    ("list_chats", {"user_id": "user"}),
-    ("read_chat_messages", {"chat_id": "chat-1"}),
     ("send_chat_message", {"chat_id": "chat-1", "body": "hello"}),
 ])
 def test_application_dispatch_refuses_delegated_only_teams_operations_before_client(operation, arguments):

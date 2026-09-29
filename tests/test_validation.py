@@ -60,7 +60,7 @@ SERVICES = ("outlook", "sharepoint", "onedrive", "calendar", "teams", "todo", "p
 #: The two Teams operations this plugin can only reach in delegated mode: in application mode
 #: the endpoint does not exist for an app-only token. They are covered by their own test
 #: instead of the happy-path table.
-APPLICATION_UNREACHABLE = ("teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message")
+APPLICATION_UNREACHABLE = ("teams.search_messages", "teams.send_messages", "teams.send_chat_message")
 
 #: One known-good payload per operation that application mode can run today.
 VALID_PAYLOADS: dict[str, dict] = {
@@ -129,6 +129,8 @@ VALID_PAYLOADS: dict[str, dict] = {
     },
     "teams.list_teams": {"action": "list_teams", "user_id": USER},
     "teams.list_channels": {"action": "list_channels", "team_id": TEAM, "select": ["displayName"]},
+    "teams.list_chats": {"action": "list_chats", "user_id": USER, "top": 10},
+    "teams.read_chat_messages": {"action": "read_chat_messages", "chat_id": "chat-1", "top": 10},
     "planner.list_plans": {"action": "list_plans"},
     "planner.list_buckets": {"action": "list_buckets", "plan_id": PLAN},
     "planner.list_tasks": {"action": "list_tasks", "plan_id": PLAN, "top": 20},
@@ -406,8 +408,8 @@ def test_application_roles_are_pinned_per_operation():
         "teams.list_channels": ("Channel.ReadBasic.All",),
         "teams.search_messages": (),
         "teams.send_messages": (),
-        "teams.list_chats": (),
-        "teams.read_chat_messages": (),
+        "teams.list_chats": ("Chat.ReadBasic.All",),
+        "teams.read_chat_messages": ("Chat.Read.All",),
         "teams.send_chat_message": (),
         "todo.list_task_lists": ("Tasks.Read.All",),
         "todo.search": ("Tasks.Read.All",),
@@ -1113,7 +1115,7 @@ EXECUTABLE_READS = frozenset(
         "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
-        "teams.list_teams", "teams.list_channels",
+        "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }

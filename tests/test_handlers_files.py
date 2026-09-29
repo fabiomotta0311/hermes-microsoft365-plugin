@@ -609,7 +609,7 @@ def test_the_registry_declares_exactly_the_six_file_reads_executable():
 
     assert set(EXECUTABLE_OPERATIONS) == {
         "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
-        "teams.list_teams", "teams.list_channels",
+        "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
     } | set(WP7_EXECUTABLE) | {"sharepoint.upload_files", "todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}
 
     assert {

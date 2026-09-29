@@ -647,9 +647,9 @@ def todo_write_support(key: str) -> ApplicationWriteSupport:
 _PERMISSION_MAP = {
     "teams.list_teams": ("Team.ReadBasic.All",), "teams.list_channels": ("Channel.ReadBasic.All",),
     "teams.search_messages": (), "teams.send_messages": (),
-    "teams.list_chats": (), "teams.read_chat_messages": (), "teams.send_chat_message": (),
+    "teams.list_chats": ("Chat.ReadBasic.All",), "teams.read_chat_messages": ("Chat.Read.All",), "teams.send_chat_message": (),
 }
-_UNSUPPORTED_APPLICATION = frozenset({"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"})
+_UNSUPPORTED_APPLICATION = frozenset({"teams.search_messages", "teams.send_messages", "teams.send_chat_message"})
 
 
 # --------------------------------------------------------------------------------------
@@ -850,6 +850,8 @@ EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "onedrive.download_files",
     "teams.list_teams",
     "teams.list_channels",
+    "teams.list_chats",
+    "teams.read_chat_messages",
     "todo.list_task_lists",
     "todo.search",
     "todo.read",
@@ -1114,13 +1116,13 @@ TEAMS_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
     MessagingEndpoint(
         service="teams", operation="list_chats", method="GET",
         path_template="/users/{user_id}/chats", container="user",
-        path_identifiers=("user_id",), contract_call="build_collection_request_information",
+        path_identifiers=("user_id",), application_permissions=("Chat.ReadBasic.All",), contract_call="build_collection_request_information",
         contract_case="teams_chats", documentation_page="https://learn.microsoft.com/en-us/graph/api/chat-list",
     ),
     MessagingEndpoint(
         service="teams", operation="read_chat_messages", method="GET",
         path_template="/chats/{chat_id}/messages", container="chat",
-        path_identifiers=("chat_id",), contract_call="build_collection_request_information",
+        path_identifiers=("chat_id",), application_permissions=("Chat.Read.All",), contract_call="build_collection_request_information",
         contract_case="teams_chat_messages", documentation_page="https://learn.microsoft.com/en-us/graph/api/chat-list-messages",
     ),
     MessagingEndpoint(

@@ -20,7 +20,7 @@ EXECUTABLE_READS = frozenset(
         "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
-        "teams.list_teams", "teams.list_channels",
+        "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }
@@ -152,7 +152,7 @@ def test_application_support_status_is_recorded_per_operation():
         for key, definition in OPERATION_REGISTRY.items()
         if definition.app.status == "unsupported_auth_mode"
     }
-    assert unsupported == {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}
+    assert unsupported == {"teams.search_messages", "teams.send_messages", "teams.send_chat_message"}
     not_verified = {
         key for key, definition in OPERATION_REGISTRY.items() if definition.app.status == "not_verified"
     }
