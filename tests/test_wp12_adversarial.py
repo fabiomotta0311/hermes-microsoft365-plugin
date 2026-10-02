@@ -176,8 +176,9 @@ def test_payload_validation_precedes_authentication_for_unknown_and_malformed_ca
     assert calls == []
 
 
+# ``onedrive.upload_files`` is executable now, so it is asserted separately: a read mutated into
+# it must reach the missing-credential failure without ever building a client or reading a secret.
 _READ_TO_WRITE_CASES = (
-    ("onedrive", "download_files", "upload_files"),
     ("calendar", "search", "create_events"),
     ("calendar", "search", "update_events"),
     ("todo", "read", "create_tasks"),
@@ -237,6 +238,29 @@ def test_registered_read_to_write_mutations_remain_non_executable(
     ) == result
 
 
+def test_a_read_mutated_into_the_executable_onedrive_upload_still_reaches_no_client(monkeypatch):
+    """``onedrive.upload_files`` is executable: the honest outcome is the missing credential."""
+    from microsoft365 import registration
+
+    reached = _runtime_probes(monkeypatch)
+    ctx = _registered()
+    payload = dict(VALID_PAYLOADS["onedrive.download_files"])
+    assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_onedrive", args=payload) is None
+    payload.clear()
+    payload.update(VALID_PAYLOADS["onedrive.upload_files"])
+
+    result = json.loads(ctx.tools["microsoft365_onedrive"]["handler"](payload))
+    assert result["error"] == "authentication_required"
+    # Reading the scoped secret is expected for an executable operation; *building* a credential
+    # or a Graph client is not, and neither is reaching any transport.
+    assert "credential" not in reached
+    assert "client" not in reached
+    # The plugin-local seam reaches the same verdict; without the configured identity it reports
+    # the configuration failure, which is the earlier and stricter of the two.
+    local = json.loads(registration.service_tool_handler("onedrive", payload, settings=_settings()))
+    assert local["error"] in {"authentication_required", "configuration_error"}
+
+
 def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mutations(monkeypatch):
     """Repeated action, destination, and user-id rewrites never reach client construction."""
     from microsoft365 import registration
@@ -254,7 +278,6 @@ def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mut
         VALID_PAYLOADS["calendar.create_events"],
         VALID_PAYLOADS["todo.update_tasks"],
         VALID_PAYLOADS["planner.create_tasks"],
-        VALID_PAYLOADS["onedrive.upload_files"],
     )
     for candidate in mutations:
         # The destination is selected from the payload itself; dispatch must not trust the
@@ -268,7 +291,17 @@ def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mut
         result = json.loads(ctx.tools[f"microsoft365_{service_name}"]["handler"](payload))
         assert result["error"] == "operation_not_implemented"
         assert result["operation"] == candidate["action"]
-    assert reached == []
+
+    # ``onedrive.upload_files`` is executable now, so the honest outcome for it is the missing
+    # credential -- never a fabricated success, and never a client that was built.
+    payload.clear()
+    payload.update(VALID_PAYLOADS["onedrive.upload_files"])
+    result = json.loads(ctx.tools["microsoft365_onedrive"]["handler"](payload))
+    assert result["error"] == "authentication_required"
+    # Reading the scoped secret is expected for an executable operation; no credential and no
+    # Graph client are ever built from it.
+    assert "credential" not in reached
+    assert "client" not in reached
 
 
 def test_malformed_or_host_owned_approval_directives_are_never_emitted_by_plugin(monkeypatch):

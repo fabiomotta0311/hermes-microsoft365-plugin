@@ -1406,7 +1406,7 @@ EXECUTABLE_OPERATIONS = frozenset(
     {
         OUTLOOK_SEARCH, OUTLOOK_READ, OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, CALENDAR_SEARCH,
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
-        "onedrive.search", "onedrive.read", "onedrive.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files", "onedrive.upload_files",
         "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
@@ -1418,7 +1418,6 @@ EXECUTABLE_OPERATIONS = frozenset(
 NON_EXECUTABLE_WRITES = frozenset(
     {
         CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS,
-        "onedrive.upload_files",
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )
@@ -1475,7 +1474,7 @@ def test_the_registry_declares_exactly_the_three_verified_reads_executable():
         assert definition.contract_cases, key
         assert definition.implementation_status == "implemented", key
         assert definition.implementation_status in IMPLEMENTATION_STATUS_LABELS, key
-        assert definition.write is (key in (NON_EXECUTABLE_WRITES | {OUTLOOK_CREATE_DRAFT, "outlook.send", "sharepoint.upload_files"})), key
+        assert definition.write is (key in (NON_EXECUTABLE_WRITES | {OUTLOOK_CREATE_DRAFT, "outlook.send", "sharepoint.upload_files", "onedrive.upload_files"})), key
         assert definition.executable is (key in EXECUTABLE_OPERATIONS), key
 
     assert {

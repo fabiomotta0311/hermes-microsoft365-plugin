@@ -152,11 +152,22 @@ def test_cross_profile_a_b_a_binding_is_fail_closed_without_secret_or_client(mon
         assert (rejection is None) is allowed
 
 
-def test_writes_remain_non_executable_after_boundary_is_applied():
+def test_only_the_promoted_writes_are_executable_after_boundary_is_applied():
+    """The user-scoped boundary changes which reads run; it never widens the write set.
+
+    Both drive uploads are executable because both carry an explicit conflict policy through the
+    resumable session; every other write stays withheld behind the same approval boundary.
+    """
     from microsoft365.contract import OPERATION_REGISTRY
 
+    executable_writes = {
+        "outlook.create_draft",
+        "outlook.send",
+        "sharepoint.upload_files",
+        "onedrive.upload_files",
+    }
     assert all(
-        definition.executable == (key in {"outlook.create_draft", "outlook.send", "sharepoint.upload_files"})
+        definition.executable == (key in executable_writes)
         for key, definition in OPERATION_REGISTRY.items()
         if definition.write
     )

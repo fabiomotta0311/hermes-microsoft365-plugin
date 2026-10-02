@@ -47,9 +47,11 @@ from msgraph.generated.models.drive_item import DriveItem
 from msgraph.generated.models.file import File
 from msgraph.generated.models.site import Site
 from msgraph.generated.models.site_collection_response import SiteCollectionResponse
+from msgraph.generated.models.upload_session import UploadSession
 
 from microsoft365 import handlers as handler_package
 from microsoft365.contract import OPERATIONS, OPERATION_REGISTRY, WRITE_OPERATIONS, Settings
+from microsoft365.upload_session import ChunkOutcome
 from microsoft365.errors import CATEGORIES, GraphError
 from microsoft365.handlers import HandlerContext, load_handlers
 from microsoft365.sdk_contract import (
@@ -78,15 +80,15 @@ WP7_HANDLERS = frozenset(
     }
 )
 
-#: The eight SharePoint/OneDrive operations exposed to the model.
+#: Every SharePoint/OneDrive operation exposed to the model: the six reads plus both uploads.
 WP7_EXECUTABLE = frozenset(
     {
         SHAREPOINT_SEARCH, SHAREPOINT_READ, SHAREPOINT_DOWNLOAD, SHAREPOINT_UPLOAD,
-        ONEDRIVE_SEARCH, ONEDRIVE_READ, ONEDRIVE_DOWNLOAD,
+        ONEDRIVE_SEARCH, ONEDRIVE_READ, ONEDRIVE_DOWNLOAD, ONEDRIVE_UPLOAD,
     }
 )
 
-#: The remaining OneDrive upload is implemented and withheld.
+#: Both uploads are writes and both are executable through the approval boundary.
 WP7_WRITES = frozenset({SHAREPOINT_UPLOAD, ONEDRIVE_UPLOAD})
 
 DRIVE = "drive"
@@ -94,6 +96,7 @@ SITE = "site"
 ITEM = "item"
 ITEM_ADDRESS = "root:/a/b.txt:"
 ITEM_ENCODED_PATH = "/drives/drive/items/root%3A%2Fa%2Fb.txt%3A"
+SESSION_URL = "https://upload.contoso.invalid/session"
 MIME = "application/pdf"
 
 
@@ -546,56 +549,131 @@ def test_upload_defaults_the_content_type_to_octet_stream():
     assert result["result"]["content_type"] == "application/octet-stream"
 
 
-def test_upload_refuses_overwrite_false_which_a_simple_put_cannot_honor():
-    import base64
-
-    adapter = HandlerGraphAdapter()
-    calls: list = []
-
-    def factory():
-        calls.append("client")
-        return graph_client(adapter)
-
-    context = HandlerContext(settings=settings(), client_factory=factory)
-    arguments = {
-        "action": "upload_files",
-        "drive_id": DRIVE,
-        "item_path": "a/b.txt",
-        "content_base64": base64.b64encode(b"payload").decode("ascii"),
-        "overwrite": False,
-    }
-
-    with pytest.raises(GraphError) as caught:
-        invocation(SHAREPOINT_UPLOAD)(arguments, context)
-
-    assert caught.value.category == "validation_error"
-    assert calls == []
-    assert adapter.requests == []
-
-
-def test_upload_rejects_an_oversized_encoded_payload_before_decoding():
+def test_upload_above_the_simple_bound_is_routed_through_an_upload_session():
+    """A file the simple ``PUT /content`` cannot hold is *not* refused: it is sent in chunks."""
     import base64
 
     from microsoft365.files import SIMPLE_TRANSFER_LIMIT_BYTES
+    from microsoft365.handlers import files as files_handlers
+    from microsoft365.upload_session import DEFAULT_CHUNK_SIZE
 
-    oversized = base64.b64encode(b"x" * (SIMPLE_TRANSFER_LIMIT_BYTES + 4096)).decode("ascii")
-    adapter = HandlerGraphAdapter()
+    payload = b"x" * (SIMPLE_TRANSFER_LIMIT_BYTES + 4096)
+    session = UploadSession(upload_url=SESSION_URL, expiration_date_time=None, next_expected_ranges=["0-"])
+    adapter = HandlerGraphAdapter(
+        {("POST", f"{ITEM_ENCODED_PATH}/createUploadSession"): session}
+    )
+    fragments: list[tuple[int, int]] = []
 
-    with pytest.raises(GraphError) as caught:
-        run(
+    def put(upload_url, start, end, total, chunk, content_type):
+        fragments.append((start, end))
+        if end + 1 < total:
+            return ChunkOutcome(status=202, next_expected_ranges=[f"{end + 1}-"])
+        return ChunkOutcome(status=201, item=None)
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(files_handlers, "put_chunk_default", put)
+    monkey.setattr(files_handlers, "sleep_default", lambda _seconds: None)
+    try:
+        result = run(
             SHAREPOINT_UPLOAD,
             {
                 "action": "upload_files",
                 "drive_id": DRIVE,
                 "item_path": "a/b.txt",
-                "content_base64": oversized,
+                "content_base64": base64.b64encode(payload).decode("ascii"),
                 "content_type": "text/plain",
             },
             adapter,
         )
+    finally:
+        monkey.undo()
 
-    assert caught.value.category == "operation_not_implemented"
-    assert adapter.requests == []
+    assert result["result"]["transfer"] == "session"
+    assert result["result"]["size_bytes"] == len(payload)
+    assert adapter.requests[0].url.endswith(f"{ITEM_ENCODED_PATH}/createUploadSession")
+    assert fragments[0] == (0, DEFAULT_CHUNK_SIZE - 1)
+    assert len(fragments) == (len(payload) + DEFAULT_CHUNK_SIZE - 1) // DEFAULT_CHUNK_SIZE
+
+
+def test_upload_conflict_behavior_fail_is_honored_through_the_session():
+    import base64
+
+    from microsoft365.handlers import files as files_handlers
+
+    payload = b"conflict"
+    session = UploadSession(upload_url=SESSION_URL, expiration_date_time=None, next_expected_ranges=["0-"])
+    adapter = HandlerGraphAdapter(
+        {("POST", f"{ITEM_ENCODED_PATH}/createUploadSession"): session}
+    )
+    sent: dict = {}
+
+    def put(upload_url, start, end, total, chunk, content_type):
+        sent["chunk"] = chunk
+        return ChunkOutcome(status=201, item=None)
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(files_handlers, "put_chunk_default", put)
+    monkey.setattr(files_handlers, "sleep_default", lambda _seconds: None)
+    try:
+        result = run(
+            SHAREPOINT_UPLOAD,
+            {
+                "action": "upload_files",
+                "drive_id": DRIVE,
+                "item_path": "a/b.txt",
+                "content_base64": base64.b64encode(payload).decode("ascii"),
+                "content_type": "text/plain",
+                "conflict_behavior": "fail",
+            },
+            adapter,
+        )
+    finally:
+        monkey.undo()
+
+    assert result["result"]["conflict_behavior"] == "fail"
+    assert result["result"]["transfer"] == "session"
+    assert sent["chunk"] == payload
+    body = adapter.requests[0].content.decode("utf-8")
+    assert "@odata.conflictBehavior" in body
+    assert "fail" in body
+
+
+def test_upload_rejects_an_oversized_encoded_payload_before_decoding(monkeypatch):
+    """The encoded gate runs before any decode, so an oversized payload is never materialized."""
+    from microsoft365 import validation
+
+    # Narrow the bound and rebuild the contracts so the test stays small: the declared ceiling is
+    # the resumable-session bound and is pinned separately so this narrowing cannot hide drift.
+    monkeypatch.setattr(validation, "MAX_UPLOAD_ENCODED_CHARS", 64)
+    monkeypatch.setattr(validation, "MAX_UPLOAD_DECODED_BYTES", 48)
+    monkeypatch.setattr(
+        validation,
+        "_TEXT_KIND_DEFAULTS",
+        {**validation._TEXT_KIND_DEFAULTS, "base64": {"max_length": 64}},
+    )
+    monkeypatch.setattr(validation, "ARGUMENT_CONTRACTS", validation._build_contracts())
+    oversized = "A" * 68
+
+    rejection = validation.check(
+        settings(),
+        service="sharepoint",
+        arguments={
+            "action": "upload_files",
+            "drive_id": DRIVE,
+            "item_path": "a/b.txt",
+            "content_base64": oversized,
+            "content_type": "text/plain",
+        },
+    )
+
+    assert rejection is not None
+    assert rejection.category == "validation_error"
+    assert "encoded" in rejection.message
+    # The product bound is the resumable-session ceiling, far above the simple transfer.
+    from microsoft365.files import SESSION_TRANSFER_LIMIT_BYTES, SIMPLE_TRANSFER_LIMIT_BYTES
+
+    assert SESSION_TRANSFER_LIMIT_BYTES > SIMPLE_TRANSFER_LIMIT_BYTES
+
 
 
 # ======================================================================================

@@ -837,12 +837,31 @@ def test_rejection_never_echoes_the_rejected_value_and_bounds_the_argument_name(
     assert len(bounded.message) < 300
 
 
-def test_oversized_base64_is_refused_before_decoding():
+def test_oversized_base64_is_refused_before_decoding(monkeypatch):
+    from microsoft365 import validation
     from microsoft365.validation import MAX_UPLOAD_DECODED_BYTES, MAX_UPLOAD_ENCODED_CHARS, check
 
     # The encoded ceiling is exactly the encoded size of a maximum payload, so the two bounds
-    # cannot drift apart.
+    # cannot drift apart, and the product ceiling is the resumable-session bound.
     assert MAX_UPLOAD_ENCODED_CHARS == 4 * ((MAX_UPLOAD_DECODED_BYTES + 2) // 3)
+    assert MAX_UPLOAD_DECODED_BYTES == 250 * 1024 * 1024 * 1024
+
+    # The exact-decode gate keeps a bounded allocation in the test while the declared ceiling
+    # remains the session bound; both are pinned so neither drifts silently.
+    SMALL_DECODED = 2048
+    monkeypatch.setattr(validation, "BASE64_EXACT_DECODE_BYTES", SMALL_DECODED * 2)
+
+    # The bound is baked into the contract at import, so the encoded ceiling is narrowed by
+    # rebuilding the contracts under a patched bound; the declared ceiling is still pinned.
+    small_encoded = 4 * ((SMALL_DECODED + 2) // 3)
+    monkeypatch.setattr(validation, "MAX_UPLOAD_ENCODED_CHARS", small_encoded)
+    monkeypatch.setattr(validation, "MAX_UPLOAD_DECODED_BYTES", SMALL_DECODED)
+    monkeypatch.setattr(
+        validation,
+        "_TEXT_KIND_DEFAULTS",
+        {**validation._TEXT_KIND_DEFAULTS, "base64": {"max_length": small_encoded}},
+    )
+    monkeypatch.setattr(validation, "ARGUMENT_CONTRACTS", validation._build_contracts())
 
     settings = _settings("application")
     accepted = check(
@@ -852,7 +871,7 @@ def test_oversized_base64_is_refused_before_decoding():
             "action": "upload_files",
             "drive_id": DRIVE,
             "item_id": ITEM,
-            "content_base64": base64.b64encode(b"A" * MAX_UPLOAD_DECODED_BYTES).decode("ascii"),
+            "content_base64": base64.b64encode(b"A" * SMALL_DECODED).decode("ascii"),
         },
     )
     assert accepted is None
@@ -866,7 +885,7 @@ def test_oversized_base64_is_refused_before_decoding():
             "action": "upload_files",
             "drive_id": DRIVE,
             "item_id": ITEM,
-            "content_base64": "?" * (MAX_UPLOAD_ENCODED_CHARS + 4),
+            "content_base64": "?" * (small_encoded + 4),
         },
     )
     assert refusal is not None
@@ -1113,7 +1132,7 @@ EXECUTABLE_READS = frozenset(
     {
         "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
-        "onedrive.search", "onedrive.read", "onedrive.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files", "onedrive.upload_files",
         "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
@@ -1124,7 +1143,6 @@ EXECUTABLE_READS = frozenset(
 WITHHELD_WRITES = frozenset(
     {
         "calendar.create_events", "calendar.update_events",
-        "onedrive.upload_files",
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )

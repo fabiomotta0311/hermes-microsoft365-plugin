@@ -23,7 +23,7 @@ def test_registry_executable_set_is_exact_and_writes_are_withheld():
     expected = {
         "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
-        "onedrive.search", "onedrive.read", "onedrive.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files", "onedrive.upload_files",
         "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",

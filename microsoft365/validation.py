@@ -56,6 +56,8 @@ from typing import Any, Mapping
 
 from .contract import OPERATIONS, OPERATION_REGISTRY, TODO_TASK_WRITE_FIELDS, Settings
 from .errors import CATEGORIES, GraphError
+from .files import SESSION_TRANSFER_LIMIT_BYTES
+from .upload_session import CHUNK_SIZE_MULTIPLE, CONFLICT_BEHAVIORS, MAX_CHUNK_SIZE
 
 #: Ceiling for an opaque Graph identifier (``user_id``, ``message_id``, ``drive_id`` ...).
 MAX_IDENTIFIER_LENGTH = 256
@@ -75,12 +77,18 @@ MAX_TIME_ZONE_LENGTH = 64
 MAX_ETAG_LENGTH = 200
 #: Ceiling for a media type.
 MAX_MEDIA_TYPE_LENGTH = 128
-#: Ceiling for the decoded size of an encoded upload payload (10 MiB; the upload-session path
-#: above it is not implemented by this plugin and is declared as such).
-MAX_UPLOAD_DECODED_BYTES = 10 * 1024 * 1024
+#: Ceiling for the decoded size of an encoded upload payload. The simple ``PUT /content``
+#: contract tops out at 10 MiB; anything larger is carried by a resumable upload session, so
+#: the validator must accept a payload the simple transfer alone could never hold.
+MAX_UPLOAD_DECODED_BYTES = SESSION_TRANSFER_LIMIT_BYTES
 #: Ceiling for the *encoded* representation, computed from the decoded ceiling so the encoded
 #: gate is the exact size of a maximum payload (a test pins the arithmetic).
 MAX_UPLOAD_ENCODED_CHARS = 4 * ((MAX_UPLOAD_DECODED_BYTES + 2) // 3)
+
+#: Above this decoded size the validator stops decoding and only checks the exact shape
+#: (alphabet, padding, length). The transfer layer decodes with ``validate=True`` under its
+#: own bound before any byte is sent, so this stays a memory decision, not a safety hole.
+BASE64_EXACT_DECODE_BYTES = 1 * 1024 * 1024
 
 #: Every argument kind this validator knows.
 KINDS = frozenset(
@@ -620,7 +628,8 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 *_file_item_arguments(),
                 _spec("content_base64", "base64", required=True),
                 _spec("content_type", "media_type", max_length=MAX_MEDIA_TYPE_LENGTH),
-                _spec("overwrite", "boolean"),
+                _spec("conflict_behavior", "enum", values=CONFLICT_BEHAVIORS),
+                _integer("chunk_size", CHUNK_SIZE_MULTIPLE, MAX_CHUNK_SIZE),
             ),
             exclusions=(_exclusive(*_ITEM_FORMS),),
         )
@@ -832,8 +841,14 @@ def _validate_base64(context: _Context, name: str, value: Any, spec: ArgumentSpe
     if decoded_size > MAX_UPLOAD_DECODED_BYTES:
         _reject(
             f"{name} decodes to more than the {MAX_UPLOAD_DECODED_BYTES} bytes this call "
-            "accepts (a larger transfer needs an upload session, which is not implemented)"
+            "accepts"
         )
+    if decoded_size > BASE64_EXACT_DECODE_BYTES:
+        # A payload this large is already resident in memory in its encoded form; decoding it here
+        # would double the allocation for no extra safety. The alphabet, padding and length
+        # checks above are exact, and the transfer layer decodes with ``validate=True`` under
+        # its own bound before any byte is sent, so nothing malformed reaches Graph.
+        return
     try:
         decoded = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError):

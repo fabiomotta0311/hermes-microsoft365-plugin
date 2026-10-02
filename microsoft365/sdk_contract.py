@@ -402,9 +402,12 @@ WRITE_CASES: tuple[str, ...] = (
     "upload_session",
 )
 
-# Rows whose request shape is fully verified here but which the product deliberately does
-# not execute yet: >10 MiB transfers stay reported as not implemented (see WP4/D3).
-UNIMPLEMENTED_CASES: frozenset[str] = frozenset({"upload_session"})
+# Rows whose request shape is fully verified here but which the product deliberately does not
+# execute yet. Empty: the resumable upload session that owns ``upload_session`` now executes, so
+# no verified row is withheld. It builds the request through this case *and* through
+# ``microsoft365/upload_session.py``, which adds the real ``DriveItem`` body and the fragment
+# transfers that target the session's own pre-authorized URL.
+UNIMPLEMENTED_CASES: frozenset[str] = frozenset()
 
 
 def build_write_request_information(

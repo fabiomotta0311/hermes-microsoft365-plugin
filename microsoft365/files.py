@@ -77,6 +77,11 @@ from .sdk_contract import build_content_request_information, build_item_request_
 #: *lower* it; asking for more fails closed instead of silently widening the contract.
 SIMPLE_TRANSFER_LIMIT_BYTES = 10 * 1024 * 1024
 
+#: The ceiling of a resumable upload session, straight from Graph's own limit. It lives here
+#: because the bound-checked decoder is shared: a session must never widen the simple-transfer
+#: contract, it decodes against its own bound.
+SESSION_TRANSFER_LIMIT_BYTES = 250 * 1024 * 1024 * 1024
+
 #: Default identifier of a path-addressed drive item (``root`` = the drive's root).
 DEFAULT_PATH_IDENTIFIER = "root"
 
@@ -317,9 +322,40 @@ def _decode_base64_text(encoded: Any, *, limit_bytes: int) -> bytes:
     ``b"abc"`` and ``"  "`` to an empty file, so an upload could carry bytes no caller ever
     encoded.
     """
+    try:
+        limit = _validated_limit(limit_bytes)
+    except TransferError as exc:
+        # A caller asking for more than the simple-transfer contract is asking for a session
+        # transfer, which decodes against its own (much larger) bound instead.
+        if exc.status != INVALID_TRANSFER_LIMIT:
+            raise
+        limit = _validated_session_limit(limit_bytes)
+    return decode_bounded_base64(encoded, limit_bytes=limit)
+
+
+def _validated_session_limit(limit_bytes: Any) -> int:
+    """The ceiling an upload *session* accepts, checked without the simple-transfer bound."""
+    if isinstance(limit_bytes, bool) or not isinstance(limit_bytes, int):
+        raise TransferError("configuration_error", status=INVALID_TRANSFER_LIMIT)
+    if not 1 <= limit_bytes <= SESSION_TRANSFER_LIMIT_BYTES:
+        raise TransferError(
+            "configuration_error",
+            status=INVALID_TRANSFER_LIMIT,
+            limit_bytes=SESSION_TRANSFER_LIMIT_BYTES,
+        )
+    return limit_bytes
+
+
+def decode_bounded_base64(encoded: Any, *, limit_bytes: int) -> bytes:
+    """Decode base64 under an explicit bound, refusing an oversized payload before decoding.
+
+    This is the bound-checked decoder both transfer paths share. It is public because the
+    upload-session path needs it with its own (larger) bound and must never widen the simple
+    transfer contract to get one.
+    """
     if not isinstance(encoded, str):
         raise TransferError("validation_error", status=INVALID_CONTENT_BASE64)
-    if len(encoded) > encoded_length_bound(limit_bytes):
+    if len(encoded) > _encoded_bound(limit_bytes):
         raise TransferError(
             "operation_not_implemented",
             status=UPLOAD_SESSION_NOT_IMPLEMENTED,
@@ -338,6 +374,11 @@ def _decode_base64_text(encoded: Any, *, limit_bytes: int) -> bytes:
             size_bytes=len(payload),
         )
     return payload
+
+
+def _encoded_bound(limit_bytes: int) -> int:
+    """The longest base64 text that can possibly carry ``limit_bytes`` bytes."""
+    return 4 * ((limit_bytes + 2) // 3)
 
 
 def _request_path(request: Any) -> str:

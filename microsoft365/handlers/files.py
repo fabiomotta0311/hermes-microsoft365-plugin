@@ -19,9 +19,10 @@ Action-specific rules this module owns (what the shared argument contract cannot
   renders the path and percent-encodes it, never this module.
 * ``download_files``/``upload_files`` go through the bounded ``microsoft365/files.py``
   transfer: exact bytes, the 10 MiB simple-transfer bound before allocation, the content type
-  of a download read from authenticated metadata only, and an upload whose ``overwrite`` is
-  ``False`` is refused because a simple ``PUT /content`` always replaces its target (a
-  conflict-safe upload needs an upload session, which is not implemented).
+  of a download read from authenticated metadata only, and an upload whose size exceeds the
+  simple-transfer bound is *not* refused -- it is routed through the resumable upload session
+  in ``microsoft365/upload_session.py``, which is also what carries the explicit
+  ``conflict_behavior`` (``replace``/``rename``/``fail``) a simple ``PUT /content`` cannot honor.
 
 The four reads above are executable; the two uploads are implemented, contract-pinned and
 exercised offline through the seam, and deliberately **not executable** until the generic
@@ -32,8 +33,15 @@ from __future__ import annotations
 from typing import Mapping
 
 from ..execution import execute_request
-from ..files import download_file, drive_item_address, upload_file
+from ..files import download_file, drive_item_address
 from ..paging import paginate
+from ..upload_session import (
+    DEFAULT_CHUNK_SIZE,
+    put_chunk_default,
+    sleep_default,
+    upload_file_auto,
+    validate_conflict_behavior,
+)
 from . import (
     HandlerContext,
     collection_payload,
@@ -194,30 +202,44 @@ def onedrive_download_files(arguments: Mapping, context: HandlerContext) -> dict
     return _drive_download(arguments, context, key=ONEDRIVE_DOWNLOAD)
 
 
+def _upload_strategy(arguments: Mapping, *, key: str) -> tuple[str, int | None]:
+    """Resolve the upload strategy from the caller's conflict request.
+
+    ``conflict_behavior`` is the definitive name: ``replace`` keeps the historical simple-PUT
+    behavior (also selected by the legacy ``overwrite=True``), ``fail`` and ``rename`` require
+    the upload session because a simple ``PUT /content`` cannot express them.
+    """
+    legacy = arguments.get("overwrite")
+    behavior = arguments.get("conflict_behavior")
+    if legacy is not None:
+        if type(legacy) is not bool:
+            refuse("validation_error", f"{key}: overwrite must be a boolean")
+        behavior = "replace" if legacy else "fail"
+    if behavior is None:
+        return "replace", None
+    return validate_conflict_behavior(behavior), None
+
+
 def _drive_upload(arguments: Mapping, context: HandlerContext, *, key: str) -> dict:
     drive_id = identifier(arguments, "drive_id", operation=key)
     drive_item_address(drive_item_id=arguments.get("item_id"), path=arguments.get("item_path"))
-    overwrite = arguments.get("overwrite")
-    if overwrite is False:
-        # A simple PUT /content always replaces its target; a conflict-safe upload needs an
-        # upload session with a conflictBehavior, which this plugin does not implement.
-        refuse(
-            "validation_error",
-            f"{key}: overwrite=False cannot be honored by a simple content upload, which always "
-            "replaces the target; a conflict-safe upload needs an upload session, which is not "
-            "implemented",
-        )
+    behavior, _ = _upload_strategy(arguments, key=key)
     content_base64 = arguments.get("content_base64")
     content_type = arguments.get("content_type") or DEFAULT_UPLOAD_CONTENT_TYPE
+    chunk_size = arguments.get("chunk_size")
 
     client, _adapter = open_graph_client(context)
-    result = upload_file(
+    result = upload_file_auto(
         client,
         drive_id=drive_id,
         content_base64=content_base64,
         content_type=content_type,
         drive_item_id=arguments.get("item_id"),
         path=arguments.get("item_path"),
+        conflict_behavior=behavior,
+        chunk_size=DEFAULT_CHUNK_SIZE if chunk_size is None else chunk_size,
+        put=put_chunk_default,
+        sleep=sleep_default,
     )
     return success_payload(key, result)
 

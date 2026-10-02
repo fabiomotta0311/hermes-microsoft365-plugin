@@ -848,6 +848,7 @@ EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "onedrive.search",
     "onedrive.read",
     "onedrive.download_files",
+    "onedrive.upload_files",
     "teams.list_teams",
     "teams.list_channels",
     "teams.list_chats",

@@ -39,7 +39,7 @@ This document states the boundary of the first standalone milestone. It is not r
 - `sharepoint.search` scopes a search by one container at most: with no container it searches **sites** (`GET /sites?$search=…`), with `drive_id` it searches that drive (`GET /drives/{drive_id}/search(q='…')`), and with `site_id` it resolves the site to its default document library (`GET /sites/{site_id}/drive`) before searching the resolved drive. `onedrive.search` is drive-scoped only: a `site_id` is refused and a search without `drive_id` is refused, because OneDrive is not site-scoped and there is no tenant-wide drive search in application mode.
 - `read` addresses one drive item by an opaque `item_id` or a validated relative `item_path` through `microsoft365.files.drive_item_address`; the generated builder renders the path and percent-encodes reserved and Unicode characters, never this plugin.
 - Six of the nine executable reads belong to these two services: `sharepoint.search`, `sharepoint.read`, `sharepoint.download_files`, `onedrive.search`, `onedrive.read` and `onedrive.download_files`.
-- The SharePoint upload operation `sharepoint.upload_files` is now executable through the final-argument approval gate for bounded simple uploads. The 10 MiB limit, exact bytes and content type remain contract-tested; `overwrite=False` and large upload sessions remain refused until their dedicated conflict/session contracts are promoted. OneDrive upload remains non-executable; `active_actions()` never returns `onedrive.upload_files` until a dedicated promotion with conflict/session semantics.
+- `sharepoint.upload_files` and `onedrive.upload_files` are executable through the final-argument approval gate for **any** file size. Small `replace` uploads use one simple `PUT /content`; anything larger -- or `conflict_behavior` `fail`/`rename`, which a simple PUT cannot express -- is routed through the resumable upload session. `conflict_behavior` is the definitive argument name; the boolean `overwrite` is kept as a compatibility alias (`true` = `replace`, `false` = `fail`). `chunk_size` is optional and must be a multiple of 320 KiB.
 
 - `active_actions()` never returns them for non-executable operations; promoted writes are the explicit exception.
 
@@ -59,16 +59,16 @@ This document states the boundary of the first standalone milestone. It is not r
 - The three To Do reads are executable through synchronous handlers and the shared paging/execution seams; `todo.create_tasks` and `todo.update_tasks` have handlers and strict real-model contracts but remain non-executable until CORE-1/CORE-2.
 - To Do permission claims are endpoint-specific and labelled `documented_not_verified`: each claim cites the endpoint it belongs to, only the task-listing endpoint carries a recorded page reference, no endpoint page was re-read offline, and no tenant has been contacted (R10, WP16). Application-mode write support for `todo.create_tasks` and `todo.update_tasks` is `not_verified` and is derived from those endpoint claims, so it cannot be promoted without recorded endpoint evidence -- promoting it fails a test. Whether the task update endpoint requires an `If-Match` ETag is not recorded, so the plugin sends no required header and adds `If-Match` only when the caller supplies one.
 
-- Executable operation inventory: `outlook.search`, `outlook.read`, `outlook.create_draft`, `outlook.send`, `calendar.search`, `sharepoint.search`, `sharepoint.read`, `sharepoint.download_files`, `sharepoint.upload_files`, `onedrive.search`, `onedrive.read`, `onedrive.download_files`, `teams.list_teams`, `teams.list_channels`, `teams.list_chats`, `teams.read_chat_messages`, `todo.list_task_lists`, `todo.search`, `todo.read`, `planner.list_buckets`, `planner.list_plans`, `planner.list_tasks`, `planner.read`. `onedrive.upload_files` remains gated even though its handler and contract are present.
+- Executable operation inventory: `outlook.search`, `outlook.read`, `outlook.create_draft`, `outlook.send`, `calendar.search`, `sharepoint.search`, `sharepoint.read`, `sharepoint.download_files`, `sharepoint.upload_files`, `onedrive.search`, `onedrive.read`, `onedrive.download_files`, `onedrive.upload_files`, `teams.list_teams`, `teams.list_channels`, `teams.list_chats`, `teams.read_chat_messages`, `todo.list_task_lists`, `todo.search`, `todo.read`, `planner.list_buckets`, `planner.list_plans`, `planner.list_tasks`, `planner.read`.
 
 Hermes currently has a generic approval modification-order defect described in the governing plan: an earlier hook can modify arguments after another hook evaluated approval against different arguments. This repository does not add a Microsoft-specific workaround. Write execution must remain disabled until the separate generic Hermes core fix binds approval to the final arguments that execute.
 A tested core patch for that dependency is included in [`docs/hermes-core-approval-fix.md`](hermes-core-approval-fix.md), but it is not applied automatically to the user's Hermes installation.
 
 ## Files and pagination
 
-- Path-based drive `/content` transfer is implemented with validated relative-path addressing, the 10 MiB simple-transfer bound enforced before allocation in both directions, and byte-exact round trips (`microsoft365/files.py`, WP4). `sharepoint.download_files` and `onedrive.download_files` consume it, so a bounded download runs as soon as those calls can; large-file upload sessions and ranged download are not implemented and are reported explicitly (`upload_session_not_implemented`, `download_range_not_implemented`).
+- Path-based drive `/content` transfer is implemented with validated relative-path addressing, the 10 MiB simple-transfer bound enforced before allocation in both directions, and byte-exact round trips (`microsoft365/files.py`, WP4). Resumable upload sessions lift the 10 MiB ceiling for **uploads** (`microsoft365/upload_session.py`: `createUploadSession`, 320 KiB-aligned fragments, resume from Graph's `nextExpectedRanges`, bounded retries, explicit `@odata.conflictBehavior`). **Download** of a file above the bound is still not implemented and is reported explicitly (`download_range_not_implemented`): range reads remain the missing half.
 - Multi-page Graph traversal is implemented as an offline helper with authenticated next-link validation, cycle detection and a global page cap (`microsoft365/paging.py`, WP5). The four executable search reads consume it (`outlook.search`, `calendar.search`, `sharepoint.search`, `onedrive.search`), so a traversal follows a next link as soon as those calls can run; multi-page behavior against a real tenant remains unverified.
-- The 10 MiB simple-transfer contract is enforced in code; the large-file upload-session request shape is contract-verified but deliberately not executed.
+- The 10 MiB simple-transfer contract is enforced in code for the one-shot path. Above it, uploads execute through the resumable session up to Graph's own 250 GiB per-session ceiling; a transfer that never completes is reported as `upload_session_incomplete`, never as a success.
 - Remote verification is `not_tested` for every operation: no tenant has been contacted (R10; WP16 is the only work package allowed to record evidence).
 
 ## Delivery
@@ -76,3 +76,16 @@ A tested core patch for that dependency is included in [`docs/hermes-core-approv
 - The repository has a SHA-pinned catalog proposal in upstream PR #114530, but it is not official until that PR is merged.
 - Plugin validation/doctor are CI gates only where the pinned Hermes release exposes the commands compatibly.
 - No production support or remote tenant behavior is claimed; the current release remains pre-release.
+
+## Microsoft 365 Files: upload sessions (PRO)
+
+- `microsoft365/upload_session.py` owns the resumable transfer: `POST .../createUploadSession`
+  with a real `CreateUploadSessionPostRequestBody`, then one `PUT` per 320 KiB-aligned fragment to
+  the session's pre-authorized URL, resuming from the `nextExpectedRanges` Graph reports.
+- The `uploadUrl` is bearer-equivalent. It never appears in a result, a log line or an exception;
+  every failure is a sanitized taxonomy error with an explicit `status`.
+- No tenant credential is attached to fragment PUTs: the URL is already authorized, and widening
+  the blast radius to a second origin is not done.
+- A stuck session cannot spin forever: consecutive replays and total fragments are both bounded.
+- Not verified against a tenant: fragment sizing, `nextExpectedRanges` handling and the committed
+  `DriveItem` are proven offline only. No remote evidence exists yet.
