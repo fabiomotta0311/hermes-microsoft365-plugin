@@ -549,6 +549,87 @@ def test_upload_defaults_the_content_type_to_octet_stream():
     assert result["result"]["content_type"] == "application/octet-stream"
 
 
+def test_the_deprecated_overwrite_alias_still_selects_the_same_behavior():
+    """The handbook promises ``overwrite`` keeps working; these two must be equivalent."""
+    import base64 as b64
+
+    payload = b"legacy alias"
+    # ``overwrite=True`` means replace, which the simple PUT path can express.
+    adapter = HandlerGraphAdapter(
+        {
+            ("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload)),
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload), name="b.txt"),
+        }
+    )
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {
+            "action": "upload_files",
+            "drive_id": DRIVE,
+            "item_path": "a/b.txt",
+            "content_base64": b64.b64encode(payload).decode(),
+            "overwrite": True,
+        },
+        adapter,
+    )
+    assert result["result"]["conflict_behavior"] == "replace"
+
+    # ``overwrite=False`` means fail, which only the resumable session can express -- so the
+    # alias proving out is that the request became a createUploadSession, not a bare PUT.
+    from microsoft365.handlers import files as files_handlers
+    from microsoft365.upload_session import ChunkOutcome, DEFAULT_CHUNK_SIZE
+
+    session_adapter = HandlerGraphAdapter(
+        {
+            ("POST", f"{ITEM_ENCODED_PATH}/createUploadSession"): UploadSession(
+                upload_url=SESSION_URL, expiration_date_time=None, next_expected_ranges=["0-"]
+            ),
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload), name="b.txt"),
+        }
+    )
+    original = files_handlers.put_chunk_default
+    files_handlers.put_chunk_default = lambda upload_url, start, end, total, chunk, content_type: ChunkOutcome(
+        status=201, item=DriveItem(id=ITEM, name="b.txt", size=total)
+    )
+    try:
+        session_result = run(
+            SHAREPOINT_UPLOAD,
+            {
+                "action": "upload_files",
+                "drive_id": DRIVE,
+                "item_path": "a/b.txt",
+                "content_base64": b64.b64encode(payload).decode(),
+                "overwrite": False,
+            },
+            session_adapter,
+        )
+    finally:
+        files_handlers.put_chunk_default = original
+
+    assert session_result["result"]["conflict_behavior"] == "fail"
+    assert session_result["result"]["transfer"] == "session"
+    assert [request.http_method.value for request in session_adapter.requests] == ["POST", "GET"]
+
+
+def test_stating_both_conflict_forms_is_refused_rather_than_one_silently_winning():
+    adapter = HandlerGraphAdapter({})
+    with pytest.raises(GraphError) as caught:
+        run(
+            SHAREPOINT_UPLOAD,
+            {
+                "action": "upload_files",
+                "drive_id": DRIVE,
+                "item_path": "a/b.txt",
+                "content_base64": "aGk=",
+                "overwrite": True,
+                "conflict_behavior": "rename",
+            },
+            adapter,
+        )
+    assert getattr(caught.value, "category", None) == "validation_error"
+    assert adapter.requests == []
+
+
 def test_an_upload_is_confirmed_against_the_item_read_back_after_the_write():
     """The provenance of a successful upload is the server's own state, not the 2xx alone."""
     import base64

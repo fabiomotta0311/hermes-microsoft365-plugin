@@ -216,6 +216,13 @@ def _upload_strategy(arguments: Mapping, *, key: str) -> tuple[str, int | None]:
     """
     legacy = arguments.get("overwrite")
     behavior = arguments.get("conflict_behavior")
+    if legacy is not None and behavior is not None:
+        # Refused rather than letting one silently outrank the other: the caller stated two
+        # different intents and whichever won would be a surprise.
+        refuse(
+            "validation_error",
+            f"{key}: pass conflict_behavior or the deprecated overwrite, not both",
+        )
     if legacy is not None:
         if type(legacy) is not bool:
             refuse("validation_error", f"{key}: overwrite must be a boolean")

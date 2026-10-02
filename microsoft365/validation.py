@@ -426,6 +426,8 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 _RECIPIENTS,
                 _spec("cc_recipients", "recipients"),
                 _spec("bcc_recipients", "recipients"),
+                # A write is confirmed by re-reading it unless the caller opts out explicitly.
+                _spec("verify", "boolean"),
             ),
         ),
         "outlook.send": OperationArguments(
@@ -637,11 +639,18 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 _spec("content_base64", "base64", required=True),
                 _spec("content_type", "media_type", max_length=MAX_MEDIA_TYPE_LENGTH),
                 _spec("conflict_behavior", "enum", values=CONFLICT_BEHAVIORS),
+                # The pre-``conflict_behavior`` boolean, kept working: ``true`` means ``replace``
+                # and ``false`` means ``fail``. Deprecated, and refused alongside the definitive
+                # name rather than silently outranking it.
+                _spec("overwrite", "boolean"),
                 _integer("chunk_size", CHUNK_SIZE_MULTIPLE, MAX_CHUNK_SIZE),
                 # A write is confirmed by re-reading it unless the caller opts out explicitly.
                 _spec("verify", "boolean"),
             ),
-            exclusions=(_exclusive(*_ITEM_FORMS),),
+            exclusions=(
+                _exclusive(*_ITEM_FORMS),
+                _at_most_one(("overwrite",), ("conflict_behavior",)),
+            ),
         )
         read = f"{service}.read"
         contracts[read] = OperationArguments(
