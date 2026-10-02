@@ -251,7 +251,9 @@ def _drive_upload(arguments: Mapping, context: HandlerContext, *, key: str) -> d
     # confirmed against the server's own state before this payload claims success; a caller
     # that must skip the extra read can say so explicitly.
     if arguments.get("verify") is False:
-        return success_payload(key, {**result, "reconciliation": {"status": "skipped"}})
+        payload = success_payload(key, result)
+        payload["reconciliation"] = {"status": "skipped"}
+        return payload
 
     path = arguments.get("item_path")
     declared = result.get("size_bytes") if isinstance(result, Mapping) else None
@@ -263,7 +265,9 @@ def _drive_upload(arguments: Mapping, context: HandlerContext, *, key: str) -> d
         expected_size=declared if isinstance(declared, int) else None,
         expected_name=_declared_file_name(path),
     )
-    return success_payload(key, {**result, "reconciliation": verdict.to_result()})
+    payload = success_payload(key, result)
+    payload["reconciliation"] = verdict.to_result()
+    return payload
 
 
 def _declared_file_name(path) -> str | None:

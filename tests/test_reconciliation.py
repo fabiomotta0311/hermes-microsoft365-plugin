@@ -18,7 +18,9 @@ from microsoft365.reconciliation import (
     UNVERIFIED,
     Reconciliation,
     compare,
+    compare_fields,
     reconcile_drive_item,
+    reconcile_resource,
 )
 
 MB = 1024 * 1024
@@ -295,3 +297,90 @@ def test_the_verdict_is_immutable():
     verdict = compare(item(), expected_size=PAYLOAD_SIZE)
     with pytest.raises(Exception):
         verdict.status = CONFIRMED
+
+# ------------------------------------------------------------------ compare_fields
+
+
+def message(*, subject="Quarterly report", identity="msg-1"):
+    from msgraph.generated.models.message import Message
+
+    return Message(id=identity, subject=subject)
+
+
+def test_matching_declared_fields_are_confirmed():
+    verdict = compare_fields(message(), {"subject": "Quarterly report"}, identity_field="id")
+    assert verdict.status == CONFIRMED
+    assert verdict.to_result()["expected"] == {"subject": "Quarterly report"}
+
+
+def test_a_field_that_differs_is_mismatched():
+    verdict = compare_fields(message(subject="Something else"), {"subject": "Quarterly report"})
+    assert verdict.status == MISMATCHED
+    assert verdict.reason == "subject_differs_from_what_was_written"
+
+
+def test_a_field_the_resource_did_not_report_is_unverified():
+    """A check that could not run must never read as a check that passed."""
+    from msgraph.generated.models.message import Message
+
+    verdict = compare_fields(Message(id="msg-1"), {"subject": "Quarterly report"})
+    assert verdict.status == UNVERIFIED
+    assert verdict.reason == "the_resource_did_not_report_the_fields_that_were_written"
+
+
+def test_declaring_nothing_is_unverified():
+    assert compare_fields(message(), {}) .status == UNVERIFIED
+
+
+def test_a_missing_identity_is_unverified():
+    from msgraph.generated.models.message import Message
+
+    verdict = compare_fields(Message(id=None, subject="X"), {"subject": "X"}, identity_field="id")
+    assert verdict.status == UNVERIFIED
+    assert verdict.reason == "the_resource_did_not_report_an_identity"
+
+
+# ------------------------------------------------------------------ reconcile_resource
+
+
+def test_a_resource_is_confirmed_when_it_appears_immediately():
+    verdict = reconcile_resource(lambda: message(), expected={"subject": "Quarterly report"}, sleep=no_wait)
+    assert verdict.status == CONFIRMED
+    assert verdict.to_result()["attempts"] == 1
+
+
+def test_a_resource_that_is_not_visible_yet_is_retried_then_confirmed():
+    seen = {"n": 0}
+
+    def read():
+        seen["n"] += 1
+        return None if seen["n"] == 1 else message()
+
+    verdict = reconcile_resource(read, expected={"subject": "Quarterly report"}, sleep=no_wait)
+    assert verdict.status == CONFIRMED
+    assert verdict.to_result()["attempts"] == 2
+
+
+def test_a_resource_that_never_appears_is_unverified_at_the_bound():
+    verdict = reconcile_resource(lambda: None, expected={"subject": "X"}, sleep=no_wait)
+    assert verdict.status == UNVERIFIED
+    assert verdict.reason == "the_resource_did_not_appear"
+    assert verdict.to_result()["attempts"] == 3
+
+
+def test_a_read_failure_is_unverified_and_never_a_failed_write():
+    def read():
+        raise RuntimeError("graph said something secret")
+
+    verdict = reconcile_resource(read, expected={"subject": "X"}, sleep=no_wait)
+    assert verdict.status == UNVERIFIED
+    assert verdict.reason == "the_resource_could_not_be_read_back"
+    assert "secret" not in str(verdict.to_result())
+
+
+def test_a_mismatch_from_a_resource_is_not_retried():
+    verdict = reconcile_resource(
+        lambda: message(subject="Other"), expected={"subject": "Quarterly report"}, sleep=no_wait
+    )
+    assert verdict.status == MISMATCHED
+    assert verdict.to_result()["attempts"] == 1

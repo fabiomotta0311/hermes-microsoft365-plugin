@@ -29,6 +29,7 @@ from msgraph.generated.users.item.send_mail.send_mail_post_request_body import (
 )
 
 from ..execution import execute_request
+from ..reconciliation import reconcile_resource
 from ..paging import paginate
 from . import (
     HandlerContext,
@@ -158,7 +159,33 @@ def create_draft(arguments: Mapping, context: HandlerContext) -> dict:
     client, adapter = open_graph_client(context)
     builder = client.users.by_user_id(user_id).messages
     response = execute_request(builder, method="POST", body=model, adapter=adapter)
-    return success_payload(CREATE_DRAFT, response)
+
+    # The created draft is read back by its own id: a 201 says the request was accepted, not
+    # that the message is retrievable with the subject that was asked for.
+    created_id = getattr(response, "id", None)
+    payload = success_payload(CREATE_DRAFT, response)
+    if arguments.get("verify") is False:
+        payload["reconciliation"] = {"status": "skipped"}
+        return payload
+    if not isinstance(created_id, str) or not created_id:
+        payload["reconciliation"] = {
+            "status": "unverified",
+            "reason": "the_create_response_carried_no_id_to_read_back",
+            "attempts": 1,
+        }
+        return payload
+    verdict = reconcile_resource(
+        lambda: execute_request(
+            client.users.by_user_id(user_id).messages.by_message_id(created_id),
+            method="GET",
+            adapter=adapter,
+            max_attempts=1,  # the read-back's bound is reconcile's, not a second multiplied one
+        ),
+        expected={"subject": getattr(model, "subject", None)},
+        identity_field="id",
+    )
+    payload["reconciliation"] = verdict.to_result()
+    return payload
 
 
 @handler("outlook", "send")

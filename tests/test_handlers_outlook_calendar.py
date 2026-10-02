@@ -1137,10 +1137,24 @@ def test_every_write_reaches_the_seam_with_the_declared_request(
 ):
     adapter = HandlerGraphAdapter({(method, path): response})
 
-    run(key, arguments, adapter)
+    payload = run(key, arguments, adapter)
 
-    assert len(adapter.requests) == 1
+    # The write is the first request and carries the declared method. Creating operations then
+    # confirm the resource they just created, so they legitimately issue one extra read.
     assert adapter.requests[0].http_method.value == method
+    if key in {"outlook.create_draft", "calendar.create_events"}:
+        # Confirmation is a bounded GET of the created resource and nothing else. This double
+        # answers only the write, so the read-back fails and is retried to its bound.
+        from microsoft365.reconciliation import DEFAULT_RECONCILE_ATTEMPTS
+
+        followed = [request.http_method.value for request in adapter.requests[1:]]
+        assert followed == ["GET"] * DEFAULT_RECONCILE_ATTEMPTS
+        verdict = payload["reconciliation"]
+        assert verdict["attempts"] == DEFAULT_RECONCILE_ATTEMPTS
+        assert verdict["status"] in {"confirmed", "unverified"}
+        assert verdict["status"] != "mismatched"
+    else:
+        assert len(adapter.requests) == 1
 
 
 @pytest.mark.parametrize("key, arguments, response, method, path", WRITE_CALLS)

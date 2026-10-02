@@ -568,9 +568,9 @@ def test_an_upload_is_confirmed_against_the_item_read_back_after_the_write():
     )
 
     assert result["status"] == "succeeded"
-    assert result["result"]["reconciliation"]["status"] == "confirmed"
-    assert result["result"]["reconciliation"]["expected"]["size"] == len(payload)
-    assert result["result"]["reconciliation"]["observed"]["size"] == len(payload)
+    assert result["reconciliation"]["status"] == "confirmed"
+    assert result["reconciliation"]["expected"]["size"] == len(payload)
+    assert result["reconciliation"]["observed"]["size"] == len(payload)
 
 
 def test_an_upload_whose_item_came_back_with_the_wrong_size_is_reported_as_mismatched():
@@ -592,7 +592,7 @@ def test_an_upload_whose_item_came_back_with_the_wrong_size_is_reported_as_misma
     )
 
     assert result["status"] == "succeeded"
-    reconciliation = result["result"]["reconciliation"]
+    reconciliation = result["reconciliation"]
     assert reconciliation["status"] == "mismatched"
     assert reconciliation["reason"] == "size_differs_from_what_was_written"
 
@@ -612,9 +612,9 @@ def test_an_upload_that_cannot_be_read_back_is_unverified_not_confirmed():
         adapter,
     )
 
-    assert result["result"]["reconciliation"]["status"] == "unverified"
-    assert result["result"]["reconciliation"]["reason"] == "the_item_could_not_be_read_back"
-    assert result["result"]["reconciliation"]["status"] != "confirmed"
+    assert result["reconciliation"]["status"] == "unverified"
+    assert result["reconciliation"]["reason"] == "the_item_could_not_be_read_back"
+    assert result["reconciliation"]["status"] != "confirmed"
 
 
 def test_a_caller_may_explicitly_skip_the_confirmation_read():
@@ -637,7 +637,7 @@ def test_a_caller_may_explicitly_skip_the_confirmation_read():
         adapter,
     )
 
-    assert result["result"]["reconciliation"] == {"status": "skipped"}
+    assert result["reconciliation"] == {"status": "skipped"}
     # Only the write was issued; no read-back was attempted.
     assert [request.http_method.value for request in adapter.requests] == ["PUT"]
 
@@ -677,7 +677,7 @@ def test_a_rename_conflict_policy_is_checked_against_the_name_that_was_asked_for
     finally:
         files_handlers.put_chunk_default = original
 
-    reconciliation = result["result"]["reconciliation"]
+    reconciliation = result["reconciliation"]
     assert reconciliation["status"] == "mismatched"
     assert reconciliation["reason"] == "name_differs_from_what_was_written"
     assert reconciliation["expected"]["name"] == "b.txt"

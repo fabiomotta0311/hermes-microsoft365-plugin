@@ -41,7 +41,7 @@ cannot smuggle a secret into the payload.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from . import execution
 from .files import (
@@ -207,6 +207,107 @@ def compare(
     return Reconciliation(CONFIRMED, expected=expected, observed=observed)
 
 
+def compare_fields(
+    item: Any,
+    expected: Mapping[str, Any],
+    *,
+    identity_field: str | None = None,
+) -> Reconciliation:
+    """Compare a re-read resource against declared scalar fields.
+
+    Only fields that are present on both sides are compared, and *every* comparable field must
+    agree. A field the server did not return is reported as unverified rather than skipped:
+    silently ignoring a missing field is how a check that never ran gets reported as passing.
+    """
+    comparable = {
+        name: value
+        for name, value in expected.items()
+        if value is not None and isinstance(name, str) and name
+    }
+    if not comparable:
+        return Reconciliation(UNVERIFIED, reason="nothing_was_declared_to_check_against")
+
+    observed: dict[str, Any] = {}
+    for name in comparable:
+        value = getattr(item, name, None)
+        observed[name] = value if isinstance(value, (str, int, bool)) else None
+
+    missing = [name for name, value in observed.items() if value is None and name != identity_field]
+    if missing:
+        return Reconciliation(
+            UNVERIFIED,
+            reason="the_resource_did_not_report_the_fields_that_were_written",
+            expected=comparable,
+            observed=observed,
+        )
+
+    identity = getattr(item, identity_field, None) if identity_field else None
+    if identity_field and not isinstance(identity, str):
+        return Reconciliation(
+            UNVERIFIED,
+            reason="the_resource_did_not_report_an_identity",
+            expected=comparable,
+            observed=observed,
+        )
+    if identity_field:
+        observed[identity_field] = identity
+
+    for name, value in comparable.items():
+        if observed.get(name) != value:
+            return Reconciliation(
+                MISMATCHED,
+                reason=f"{name}_differs_from_what_was_written",
+                expected=comparable,
+                observed=observed,
+            )
+    return Reconciliation(CONFIRMED, expected=comparable, observed=observed)
+
+
+def reconcile_resource(
+    read: Callable[[], Any],
+    *,
+    expected: Mapping[str, Any],
+    identity_field: str | None = None,
+    attempts: int = DEFAULT_RECONCILE_ATTEMPTS,
+    sleep: Callable[[float], None] | None = None,
+) -> Reconciliation:
+    """Read a written resource back and compare it, retrying only while it is not yet visible.
+
+    ``read`` performs one fetch and returns the resource (or ``None`` when it is not there yet).
+    A resource that has been found and contradicts the write is never retried -- the answer was
+    clear; only invisibility is worth another attempt.
+    """
+    read_attempts = 0
+    while True:
+        read_attempts += 1
+        try:
+            item = read()
+        except Exception:  # noqa: BLE001 - a failed read is "unverified", never "failed"
+            if read_attempts >= max(1, attempts):
+                return Reconciliation(
+                    UNVERIFIED, reason="the_resource_could_not_be_read_back", attempts=read_attempts
+                )
+            _wait(sleep, read_attempts)
+            continue
+
+        if item is None:
+            if read_attempts >= max(1, attempts):
+                return Reconciliation(
+                    UNVERIFIED, reason="the_resource_did_not_appear", attempts=read_attempts
+                )
+            _wait(sleep, read_attempts)
+            continue
+
+        verdict = compare_fields(item, expected, identity_field=identity_field)
+        return Reconciliation(
+            verdict.status,
+            reason=verdict.reason,
+            expected=verdict.expected,
+            observed=verdict.observed,
+            attempts=read_attempts,
+        )
+
+
 def reconcile_drive_item(
     client: Any,
     *,
@@ -243,6 +344,7 @@ def reconcile_drive_item(
                 method="GET",
                 configuration=_empty_configuration(),
                 adapter=adapter,
+                max_attempts=1,  # this function owns the attempt bound; do not multiply it
             )
         except Exception as exc:  # noqa: BLE001 - a failed read means "unverified", never "failed"
             if read_attempts >= max(1, attempts):

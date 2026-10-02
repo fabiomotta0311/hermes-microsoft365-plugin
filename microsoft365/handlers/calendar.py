@@ -36,6 +36,7 @@ from msgraph.generated.models.item_body import ItemBody
 from msgraph.generated.models.location import Location
 
 from ..execution import execute_request, request_information_sender
+from ..reconciliation import reconcile_resource
 from ..paging import paginate
 from ..validation import EVENT_PATCH_FIELDS
 from . import (
@@ -230,7 +231,33 @@ def create_events(arguments: Mapping, context: HandlerContext) -> dict:
         supplied=changed_fields(arguments, CREATE_EVENT_FIELDS, operation=CREATE_EVENTS),
     )
     response = execute_request(builder, method="POST", body=model, adapter=adapter)
-    return success_payload(CREATE_EVENTS, response)
+
+    # The created event is read back by its own id: a 201 says the request was accepted, not
+    # that the event is retrievable with the subject that was asked for.
+    created_id = getattr(response, "id", None)
+    payload = success_payload(CREATE_EVENTS, response)
+    if arguments.get("verify") is False:
+        payload["reconciliation"] = {"status": "skipped"}
+        return payload
+    if not isinstance(created_id, str) or not created_id:
+        payload["reconciliation"] = {
+            "status": "unverified",
+            "reason": "the_create_response_carried_no_id_to_read_back",
+            "attempts": 1,
+        }
+        return payload
+    verdict = reconcile_resource(
+        lambda: execute_request(
+            client.users.by_user_id(user_id).calendar.events.by_event_id(created_id),
+            method="GET",
+            adapter=adapter,
+            max_attempts=1,  # the read-back's bound is reconcile's, not a second multiplied one
+        ),
+        expected={"subject": subject},
+        identity_field="id",
+    )
+    payload["reconciliation"] = verdict.to_result()
+    return payload
 
 
 @handler("calendar", "update_events")

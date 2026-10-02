@@ -469,6 +469,8 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 _spec("is_all_day", "boolean"),
                 # Graph uses this client-supplied key to deduplicate event creation retries.
                 _spec("transaction_id", "identifier"),
+                # A write is confirmed by re-reading it unless the caller opts out explicitly.
+                _spec("verify", "boolean"),
             ),
         ),
         "calendar.update_events": OperationArguments(
