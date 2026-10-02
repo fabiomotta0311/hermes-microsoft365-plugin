@@ -636,6 +636,8 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 _spec("content_type", "media_type", max_length=MAX_MEDIA_TYPE_LENGTH),
                 _spec("conflict_behavior", "enum", values=CONFLICT_BEHAVIORS),
                 _integer("chunk_size", CHUNK_SIZE_MULTIPLE, MAX_CHUNK_SIZE),
+                # A write is confirmed by re-reading it unless the caller opts out explicitly.
+                _spec("verify", "boolean"),
             ),
             exclusions=(_exclusive(*_ITEM_FORMS),),
         )

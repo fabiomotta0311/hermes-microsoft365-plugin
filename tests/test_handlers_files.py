@@ -549,6 +549,140 @@ def test_upload_defaults_the_content_type_to_octet_stream():
     assert result["result"]["content_type"] == "application/octet-stream"
 
 
+def test_an_upload_is_confirmed_against_the_item_read_back_after_the_write():
+    """The provenance of a successful upload is the server's own state, not the 2xx alone."""
+    import base64
+
+    payload = b"hello wp7"
+    adapter = HandlerGraphAdapter(
+        {
+            ("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload)),
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload), name="b.txt"),
+        }
+    )
+
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {"action": "upload_files", "drive_id": DRIVE, "item_path": "a/b.txt", "content_base64": base64.b64encode(payload).decode()},
+        adapter,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["result"]["reconciliation"]["status"] == "confirmed"
+    assert result["result"]["reconciliation"]["expected"]["size"] == len(payload)
+    assert result["result"]["reconciliation"]["observed"]["size"] == len(payload)
+
+
+def test_an_upload_whose_item_came_back_with_the_wrong_size_is_reported_as_mismatched():
+    """Success plus a contradicting re-read is an incident, never a clean success."""
+    import base64
+
+    payload = b"x" * 1024
+    adapter = HandlerGraphAdapter(
+        {
+            ("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload)),
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload) - 1, name="b.txt"),
+        }
+    )
+
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {"action": "upload_files", "drive_id": DRIVE, "item_path": "a/b.txt", "content_base64": base64.b64encode(payload).decode()},
+        adapter,
+    )
+
+    assert result["status"] == "succeeded"
+    reconciliation = result["result"]["reconciliation"]
+    assert reconciliation["status"] == "mismatched"
+    assert reconciliation["reason"] == "size_differs_from_what_was_written"
+
+
+def test_an_upload_that_cannot_be_read_back_is_unverified_not_confirmed():
+    """A re-read failure must not be laundered into a confirmation."""
+    import base64
+
+    payload = b"hello"
+    adapter = HandlerGraphAdapter(
+        {("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload))}
+    )
+
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {"action": "upload_files", "drive_id": DRIVE, "item_path": "a/b.txt", "content_base64": base64.b64encode(payload).decode()},
+        adapter,
+    )
+
+    assert result["result"]["reconciliation"]["status"] == "unverified"
+    assert result["result"]["reconciliation"]["reason"] == "the_item_could_not_be_read_back"
+    assert result["result"]["reconciliation"]["status"] != "confirmed"
+
+
+def test_a_caller_may_explicitly_skip_the_confirmation_read():
+    import base64
+
+    payload = b"hello"
+    adapter = HandlerGraphAdapter(
+        {("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload))}
+    )
+
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {
+            "action": "upload_files",
+            "drive_id": DRIVE,
+            "item_path": "a/b.txt",
+            "content_base64": base64.b64encode(payload).decode(),
+            "verify": False,
+        },
+        adapter,
+    )
+
+    assert result["result"]["reconciliation"] == {"status": "skipped"}
+    # Only the write was issued; no read-back was attempted.
+    assert [request.http_method.value for request in adapter.requests] == ["PUT"]
+
+
+def test_a_rename_conflict_policy_is_checked_against_the_name_that_was_asked_for():
+    """The reconciliation compares the name the caller requested, so a rename is visible."""
+    import base64 as b64
+
+    payload = b"x" * 4096
+    session = UploadSession(upload_url=SESSION_URL, expiration_date_time=None, next_expected_ranges=["0-"])
+    adapter = HandlerGraphAdapter(
+        {
+            ("POST", f"{ITEM_ENCODED_PATH}/createUploadSession"): session,
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload), name="b (2).txt"),
+        }
+    )
+
+    def put(upload_url, start, end, total, chunk, content_type):
+        return ChunkOutcome(status=201, item=DriveItem(id=ITEM, name="b.txt", size=total))
+
+    from microsoft365.handlers import files as files_handlers
+
+    original = files_handlers.put_chunk_default
+    files_handlers.put_chunk_default = put
+    try:
+        result = run(
+            SHAREPOINT_UPLOAD,
+            {
+                "action": "upload_files",
+                "drive_id": DRIVE,
+                "item_path": "a/b.txt",
+                "content_base64": b64.b64encode(payload).decode(),
+                "conflict_behavior": "rename",
+            },
+            adapter,
+        )
+    finally:
+        files_handlers.put_chunk_default = original
+
+    reconciliation = result["result"]["reconciliation"]
+    assert reconciliation["status"] == "mismatched"
+    assert reconciliation["reason"] == "name_differs_from_what_was_written"
+    assert reconciliation["expected"]["name"] == "b.txt"
+
+
 def test_upload_above_the_simple_bound_is_routed_through_an_upload_session():
     """A file the simple ``PUT /content`` cannot hold is *not* refused: it is sent in chunks."""
     import base64

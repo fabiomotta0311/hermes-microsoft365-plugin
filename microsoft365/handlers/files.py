@@ -35,6 +35,7 @@ from typing import Mapping
 from ..execution import execute_request
 from ..download_range import download_file_auto
 from ..files import drive_item_address
+from ..reconciliation import reconcile_drive_item
 from ..paging import paginate
 from ..upload_session import (
     DEFAULT_CHUNK_SIZE,
@@ -245,7 +246,36 @@ def _drive_upload(arguments: Mapping, context: HandlerContext, *, key: str) -> d
         put=put_chunk_default,
         sleep=sleep_default,
     )
-    return success_payload(key, result)
+
+    # A 2xx means the request was accepted, not that the bytes are there. The write is
+    # confirmed against the server's own state before this payload claims success; a caller
+    # that must skip the extra read can say so explicitly.
+    if arguments.get("verify") is False:
+        return success_payload(key, {**result, "reconciliation": {"status": "skipped"}})
+
+    path = arguments.get("item_path")
+    declared = result.get("size_bytes") if isinstance(result, Mapping) else None
+    verdict = reconcile_drive_item(
+        client,
+        drive_id=drive_id,
+        drive_item_id=arguments.get("item_id"),
+        path=path,
+        expected_size=declared if isinstance(declared, int) else None,
+        expected_name=_declared_file_name(path),
+    )
+    return success_payload(key, {**result, "reconciliation": verdict.to_result()})
+
+
+def _declared_file_name(path) -> str | None:
+    """The name the caller asked for, from the same relative path the write addressed.
+
+    Only a path-shaped request names its own target; an upload addressed by an opaque
+    ``item_id`` declares no name, and reconciliation then checks what it can (the size)
+    rather than inventing one.
+    """
+    if not isinstance(path, str) or not path:
+        return None
+    return path.rstrip("/").rpartition("/")[2] or None
 
 
 @handler("sharepoint", "upload_files")
