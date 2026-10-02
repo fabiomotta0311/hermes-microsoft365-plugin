@@ -226,6 +226,49 @@ def test_a_signature_failure_is_a_sanitized_refusal():
     assert "secret" not in str(caught.value.to_result())
 
 
+def test_an_infrastructure_failure_while_verifying_is_not_reported_as_a_bad_token():
+    """A key endpoint we cannot reach says nothing about the token, and must stay retryable.
+
+    Answering "unauthorized" tells Bot Framework to stop retrying, so a transient failure would
+    silently drop a legitimate message with nothing for an operator to alert on.
+    """
+
+    def unreachable(token, keys, algorithm, audience):
+        raise ConnectionError("key endpoint unreachable")
+
+    with pytest.raises(InboundTeamsError) as caught:
+        verify_activity_token(
+            token_for(), audience=AUDIENCE, verify_signature=unreachable, now=NOW
+        )
+    assert caught.value.category == "configuration_error"
+    assert caught.value.status == INVALID_TOKEN
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [ConnectionError("down"), TimeoutError("slow"), OSError("socket"), ImportError("no jwt")],
+)
+def test_every_operational_verification_failure_is_a_configuration_error(failure):
+    def explode(token, keys, algorithm, audience):
+        raise failure
+
+    with pytest.raises(InboundTeamsError) as caught:
+        verify_activity_token(token_for(), audience=AUDIENCE, verify_signature=explode, now=NOW)
+    assert caught.value.category == "configuration_error"
+
+
+def test_a_token_shaped_failure_stays_an_authentication_refusal():
+    """The distinction cuts both ways: an unusable token is still a 401, not a server error."""
+
+    def refuses(token, keys, algorithm, audience):
+        raise ValueError("the signature did not verify")
+
+    with pytest.raises(InboundTeamsError) as caught:
+        verify_activity_token(token_for(), audience=AUDIENCE, verify_signature=refuses, now=NOW)
+    assert caught.value.category == "authentication_required"
+    assert caught.value.status == INVALID_TOKEN
+
+
 def test_a_missing_key_set_is_a_configuration_error_not_a_pass():
     with pytest.raises(InboundTeamsError) as caught:
         verify_activity_token(token_for(), audience=AUDIENCE, keys=None, now=NOW)

@@ -217,6 +217,17 @@ def parse_activity(payload: Any) -> Activity:
 
 VerifySignature = Callable[[str, Sequence[Mapping], str, str | None], Mapping]
 
+#: Failures that mean *we* could not check the token rather than that the token is bad. Kept
+#: deliberately small and unambiguous: anything about the token itself stays an auth refusal,
+#: and the specific "the token is not valid" family is recognised by PyJWT inside the seam.
+_OPERATIONAL_VERIFICATION_FAILURES = (
+    ConnectionError,
+    TimeoutError,
+    OSError,
+    ImportError,
+    MemoryError,
+)
+
 
 def _claims_via_pyjwt(token: str, keys: Sequence[Mapping], algorithm: str, audience: str | None) -> Mapping:
     """The production signature seam: real ``PyJWT`` verification against published JWKS.
@@ -228,8 +239,12 @@ def _claims_via_pyjwt(token: str, keys: Sequence[Mapping], algorithm: str, audie
     """
     import jwt
     from jwt import PyJWKSet
+    from jwt.exceptions import PyJWKError
 
-    key_set = PyJWKSet.from_dict({"keys": list(keys)})
+    try:
+        key_set = PyJWKSet.from_dict({"keys": list(keys)})
+    except Exception as exc:  # noqa: BLE001 - the key set itself is unusable, not the token
+        raise InboundTeamsError("configuration_error", status=INVALID_TOKEN) from exc
     header = jwt.get_unverified_header(token)
     key = next(
         (
@@ -241,13 +256,17 @@ def _claims_via_pyjwt(token: str, keys: Sequence[Mapping], algorithm: str, audie
     )
     if key is None:
         raise InboundTeamsError("authentication_required", status=INVALID_TOKEN)
-    return jwt.decode(
-        token,
-        key.key,
-        algorithms=[algorithm],
-        audience=audience,
-        options={"verify_exp": False, "verify_aud": False, "verify_iss": False},
-    )
+    try:
+        return jwt.decode(
+            token,
+            key.key,
+            algorithms=[algorithm],
+            audience=audience,
+            options={"verify_exp": False, "verify_aud": False, "verify_iss": False},
+        )
+    except PyJWKError as exc:
+        # The key could not be used at all -- this says nothing about the presented token.
+        raise InboundTeamsError("configuration_error", status=INVALID_TOKEN) from exc
 
 
 def verify_activity_token(
@@ -300,6 +319,12 @@ def verify_activity_token(
         claims = claims_verifier(token, tuple(keys or ()), algorithm, audience)
     except InboundTeamsError:
         raise
+    except _OPERATIONAL_VERIFICATION_FAILURES:
+        # A broken key set or an unreachable key endpoint is our problem, not the token's. It is
+        # reported as a configuration error so the caller can retry after fixing it: answering
+        # "unauthorized" would tell Bot Framework to stop retrying and drop a legitimate message
+        # with nothing to alert on.
+        raise InboundTeamsError("configuration_error", status=INVALID_TOKEN) from None
     except Exception:  # noqa: BLE001 - every signature failure is the same sanitized refusal
         raise InboundTeamsError("authentication_required", status=INVALID_TOKEN) from None
 

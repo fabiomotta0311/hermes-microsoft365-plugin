@@ -30,6 +30,13 @@ All notable changes to this project are documented here.
   lifetime against an explicit clock and tolerance, projects the Activity onto a closed field
   set, and correlates identity by `(tenant_id, sender_id, conversation_id)` with bounded
   deduplication. Admitting an Activity can never send anything.
+- **A Bot Framework webhook.** `microsoft365/teams_webhook.py` is a WSGI application (no new
+  dependency) that serves one path, `POST` only, as JSON, with a required and bounded
+  `Content-Length`, and renders the boundary's answer as a status code. Every distinguishable
+  token failure leaves as the same anonymous `401`; a failure of ours is a retryable `500`; a
+  failed reply is a `200` carrying the failure, because a `5xx` would provoke a redelivery that
+  the duplicate guard would suppress anyway. Verified over a real TCP socket, not only through
+  WSGI.
 - **Operator-bound reply loopback.** A non-duplicate inbound decision becomes a reply whose
   destination comes from the operator's route and never from the Activity body, delivered only
   through the separately authorised send operation.
@@ -54,6 +61,13 @@ All notable changes to this project are documented here.
   disabled.
 
 ### Fixed
+
+- An unreachable JWKS endpoint was reported as an authentication refusal, telling Bot Framework to
+  stop retrying and silently dropping a legitimate message. Failures of ours are now
+  `configuration_error`; failures about the token stay sanitized `401`s.
+- The endpoint read its body by asking the stream for the maximum body size, which under WSGI
+  blocks until the peer closes the connection. The reader now asks for exactly `Content-Length`
+  bytes, the only delimiter a request body has.
 
 - `verify` on `outlook.create_draft` was honoured by the handler but never declared by the
   contract, so the documented opt-out was refused.

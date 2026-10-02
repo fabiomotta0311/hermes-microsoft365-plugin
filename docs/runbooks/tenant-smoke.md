@@ -173,7 +173,22 @@ app-only. Se o modo delegado usar credencial de aplicação, isso é um defeito 
 
 ### Etapa 6 — Teams: entrada autenticada e resposta roteada
 
-Esta é a única etapa que não pode ser provada offline, porque depende de um listener.
+O endpoint existe e é testado sobre socket real (`microsoft365/teams_webhook.py`, aplicação WSGI).
+O que esta etapa acrescenta é o que **só** o tenant prova: o registro do bot, o App ID, as chaves
+publicadas e a URL que o serviço da nuvem realmente chama.
+
+Monte a aplicação no host:
+
+```text
+from microsoft365.teams_webhook import build_application
+app = build_application(
+    registry=registry,           # ConversationRegistry
+    audience=<bot-app-id>,       # o App ID do registro do bot
+    keys=<jwks>,                 # chaves públicas; buscá-las e cacheá-las é do host
+    on_activity=hand_off_to_session,
+    reply=answer,                # deliver_reply(plan_reply_for(...), send=<op autorizada>)
+)
+```
 
 1. Registre a identidade externa contra uma sessão Hermes e vincule a rota de resposta, no host:
 
