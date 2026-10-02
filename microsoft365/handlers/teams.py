@@ -3,7 +3,8 @@
 ``list_teams`` and ``list_channels`` are the only application-mode executable operations.
 The two other handlers are retained and contract-tested for delegated authentication, but the
 registry and dispatch gate refuse them before any client, credential, secret, or network work.
-Bot Framework integrations are intentionally outside this module.
+The inbound Bot Framework boundary is a separate module (`microsoft365/teams_inbound.py`): it
+decides which session an incoming Activity belongs to, and never sends anything.
 """
 from __future__ import annotations
 
