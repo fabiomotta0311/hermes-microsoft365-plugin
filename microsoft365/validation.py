@@ -617,7 +617,13 @@ def _build_contracts() -> dict[str, OperationArguments]:
         download = f"{service}.download_files"
         contracts[download] = OperationArguments(
             key=download,
-            properties=(_spec("drive_id", "identifier", required=True), *_file_item_arguments()),
+            properties=(
+                _spec("drive_id", "identifier", required=True),
+                *_file_item_arguments(),
+                # Optional ranged-read window for files above the simple-transfer bound. A
+                # multiple of 320 KiB, exactly like the upload fragment size.
+                _integer("range_size", CHUNK_SIZE_MULTIPLE, MAX_CHUNK_SIZE),
+            ),
             exclusions=(_exclusive(*_ITEM_FORMS),),
         )
         upload = f"{service}.upload_files"

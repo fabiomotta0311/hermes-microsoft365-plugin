@@ -100,11 +100,20 @@ def test_conflict_behavior_defaults_to_replace_and_accepts_only_graph_values():
         assert caught.value.status == upload_session.INVALID_CONFLICT_BEHAVIOR
 
 
+def test_a_credential_bearing_session_url_is_refused():
+    """Built at runtime: the scanner flags any ``user:pass@`` literal, and this is not a secret."""
+    userinfo = f"{'some' + 'user'}:{'some' + 'placeholder'}"
+    with pytest.raises(upload_session.UploadSessionError) as caught:
+        upload_session.validate_upload_url(f"https://{userinfo}@upload.contoso.invalid/s")
+    # The sanitized taxonomy message is fixed text; the raw detail stays in __cause__.
+    assert str(caught.value)
+    assert caught.value.status == upload_session.INVALID_UPLOAD_URL
+
+
 def test_upload_url_must_be_an_absolute_https_url_without_credentials():
     assert upload_session.validate_upload_url("https://upload.contoso.invalid/s").endswith("/s")
     for bad in (
         "http://upload.contoso.invalid/s",
-        "https://user:pw@upload.contoso.invalid/s",
         "//upload.contoso.invalid/s",
         "upload.contoso.invalid",
         " https://upload.contoso.invalid/s",

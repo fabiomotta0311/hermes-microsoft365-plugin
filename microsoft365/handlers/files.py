@@ -33,7 +33,8 @@ from __future__ import annotations
 from typing import Mapping
 
 from ..execution import execute_request
-from ..files import download_file, drive_item_address
+from ..download_range import download_file_auto
+from ..files import drive_item_address
 from ..paging import paginate
 from ..upload_session import (
     DEFAULT_CHUNK_SIZE,
@@ -181,11 +182,14 @@ def _drive_download(arguments: Mapping, context: HandlerContext, *, key: str) ->
     drive_item_address(drive_item_id=arguments.get("item_id"), path=arguments.get("item_path"))
 
     client, _adapter = open_graph_client(context)
-    result = download_file(
+    # ``auto`` picks the smallest mechanism that can carry the file: one GET within the simple
+    # bound, aligned ranged reads above it. Both return the same BinaryResult contract.
+    result = download_file_auto(
         client,
         drive_id=drive_id,
         drive_item_id=arguments.get("item_id"),
         path=arguments.get("item_path"),
+        range_size=arguments.get("range_size"),
     )
     return success_payload(key, result)
 
