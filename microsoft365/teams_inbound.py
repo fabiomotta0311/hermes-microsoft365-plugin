@@ -55,11 +55,6 @@ ACCEPTED_ALGORITHM = "RS256"
 #: Bot Framework's own issuers. Both are checked; a token from anywhere else is refused.
 BOT_FRAMEWORK_ISSUERS = ("https://api.botframework.com",)
 
-#: The public key endpoint Bot Framework publishes its signing keys at.
-BOT_FRAMEWORK_OPENID_METADATA = (
-    "https://login.botframework.com/v1/.well-known/openidconfiguration"
-)
-
 #: Clock skew allowance when checking ``exp``/``nbf``, in seconds. Tokens live 5 minutes and
 #: clocks are not perfectly aligned; a small explicit window beats a silent tolerance.
 DEFAULT_LEEWAY_SECONDS = 300
@@ -75,7 +70,6 @@ TOKEN_AUDIENCE_MISMATCH = "token_audience_mismatch"
 TOKEN_ISSUER_MISMATCH = "token_issuer_mismatch"
 TOKEN_ALGORITHM_NOT_ALLOWED = "token_algorithm_not_allowed"
 UNKNOWN_IDENTITY = "unknown_identity"
-DUPLICATE_ACTIVITY = "duplicate_activity"
 IDENTITY_BOUND_TO_ANOTHER_SESSION = "identity_bound_to_another_session"
 
 _ACTIONS = {
@@ -87,7 +81,6 @@ _ACTIONS = {
     TOKEN_ISSUER_MISMATCH: "the token was not issued by bot framework",
     TOKEN_ALGORITHM_NOT_ALLOWED: "the token is not signed with the accepted algorithm",
     UNKNOWN_IDENTITY: "register the external identity against a hermes session first",
-    DUPLICATE_ACTIVITY: "this activity was already delivered; do not process it twice",
     IDENTITY_BOUND_TO_ANOTHER_SESSION: "unbind the identity before rebinding it",
 }
 
@@ -281,7 +274,10 @@ def verify_activity_token(
        implicit defaults.
 
     ``verify_signature`` is the seam that makes this testable offline; production leaves it
-    unset and gets real JWKS verification.
+    unset and gets real JWKS verification. **Fetching and caching the published key set is the
+    caller's job** -- those keys rotate, and a boundary that fetched them inline would put a
+    network round trip inside its own verification path. They are published at
+    ``https://login.botframework.com/v1/.well-known/openidconfiguration``.
     """
     if not isinstance(token, str) or not token.strip() or len(token) > 16_384:
         raise InboundTeamsError("authentication_required", status=INVALID_TOKEN)

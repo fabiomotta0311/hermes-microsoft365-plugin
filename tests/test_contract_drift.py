@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from pathlib import Path
 
 import pytest
 
@@ -209,3 +210,109 @@ def test_the_handbook_does_not_promise_an_operation_that_does_not_exist():
     assert documented, "no documented operation names were found"
     unknown = sorted(name for name in documented if name not in OPERATION_REGISTRY)
     assert not unknown, f"the docs name operations that do not exist: {unknown}"
+
+# ------------------------------------------------------------------ status vocabulary drift
+
+#: The status-to-action mapping, removed before looking for real emission sites.
+ACTIONS_BLOCK = re.compile(r"^_ACTIONS = \{.*?^\}", re.S | re.M)
+
+STATUS_MODULES = (
+    "microsoft365.files",
+    "microsoft365.upload_session",
+    "microsoft365.download_range",
+    "microsoft365.teams_inbound",
+    "microsoft365.teams_loopback",
+)
+
+
+def _status_modules():
+    import importlib
+
+    return {name: importlib.import_module(name) for name in STATUS_MODULES}
+
+
+def test_every_status_with_a_stated_action_is_actually_emitted():
+    """A status that has an action but never fires is dead -- and dead statuses get documented.
+
+    Each transfer and inbound module keeps an ``_ACTIONS`` mapping that is, by definition, its
+    status vocabulary: a static "what the caller can do about it" per status. A constant whose
+    value is a key of that mapping but whose *name* is never referenced is a failure the code
+    cannot produce. Three had already been written into the tenant runbook as things to expect
+    before this check existed -- the runbook described failures that could never occur.
+    """
+    offenders = []
+    for module_name, module in _status_modules().items():
+        actions = getattr(module, "_ACTIONS", None)
+        if not isinstance(actions, dict) or not actions:
+            continue
+        source = inspect.getsource(module)
+        # Strip the vocabulary mapping itself: a key listed there is not an emission, and
+        # matching only on lines containing "_ACTIONS" would count the mapping's own entries
+        # as uses -- which is precisely how a dead status hides.
+        emission_sites = ACTIONS_BLOCK.sub("", source)
+        for constant, value in sorted(vars(module).items()):
+            if not (constant.isupper() and isinstance(value, str)) or value not in actions:
+                continue
+            # Referenced by NAME: the raise sites use the constant, never the literal value.
+            references = [
+                line for line in emission_sites.split("\n")
+                if constant in line and not line.strip().startswith(constant + " =")
+            ]
+            if not references:
+                offenders.append(f"{module_name}.{constant} ({value})")
+    assert not offenders, (
+        "these statuses have a documented action but nothing ever emits them: "
+        f"{offenders}"
+    )
+
+
+def test_the_actions_mapping_keys_are_the_status_vocabulary():
+    """Every ``_ACTIONS`` value must be an actual status string, so the vocabulary stays greppable."""
+    for module_name, module in _status_modules().items():
+        actions = getattr(module, "_ACTIONS", None)
+        if not isinstance(actions, dict):
+            continue
+        assert actions, f"{module_name} defines an empty _ACTIONS"
+        for status, action in actions.items():
+            assert re.match(r"^[a-z][a-z0-9_]*$", status), (
+                f"{module_name} maps a non-status key {status!r} to an action"
+            )
+            assert action and action[0].islower(), (
+                f"{module_name} gives {status!r} an action that is not a lowercase instruction"
+            )
+
+
+def test_the_runbook_only_names_failures_the_code_can_produce():
+    """The tenant runbook is an instruction manual: it must not triage impossible failures."""
+    root = Path(handlers.__file__).resolve().parents[2]
+    runbook = root / "docs" / "runbooks" / "tenant-smoke.md"
+    text = runbook.read_text(encoding="utf-8")
+    # Statuses appear in the triage tables as inline code inside the first cell.
+    named = set(re.findall(r"^\| `([a-z][a-z0-9_]{3,})` \|", text, flags=re.M))
+    assert named, "the runbook no longer contains any triage table"
+
+    # Scope note: only the runbook's triage tables are checked. ``known-limitations.md`` carries
+    # the same kind of claim, but in prose that also quotes argument names, permission states and
+    # tool names -- a blanket regex over it flags all of those, so the check would either be
+    # vacuous or wrong. The prose doc is reviewed by hand; this docstring says so rather than
+    # implying a guarantee that does not exist.
+
+    @staticmethod
+    def _vocabulary():
+        # Error categories are authoritative: every category the plugin can report is a key of
+        # the canonical message map, which is what a caller sees.
+        from microsoft365.errors import MESSAGES
+
+        vocabulary = set(MESSAGES)
+        for module in _status_modules().values():
+            vocabulary |= set(getattr(module, "_ACTIONS", {}) or {})
+            vocabulary |= {
+                value for name, value in vars(module).items()
+                if name.isupper() and isinstance(value, str) and value.islower() and "_" in value
+            }
+        return vocabulary
+
+    # Column headers are single words that are not statuses; the tables use them for the label.
+    headers = {"status", "resultado", "veredicto", "significado", "ação"}
+    unknown = sorted(named - _vocabulary() - headers)
+    assert not unknown, f"the runbook triages statuses that do not exist: {unknown}"

@@ -93,7 +93,6 @@ INVALID_UPLOAD_URL = "invalid_upload_url"
 UPLOAD_SESSION_FAILED = "upload_session_failed"
 UPLOAD_SESSION_INCOMPLETE = "upload_session_incomplete"
 UPLOAD_SESSION_TOO_LARGE = "upload_session_too_large"
-UPLOAD_SESSION_NO_URL = "upload_session_no_url"
 UPLOAD_SESSION_NO_NAME = "upload_session_no_name"
 
 _ACTIONS = {
@@ -103,7 +102,6 @@ _ACTIONS = {
     UPLOAD_SESSION_FAILED: "retry the upload; already committed chunks are not re-sent",
     UPLOAD_SESSION_INCOMPLETE: "the transfer ended before Graph reported the file committed",
     UPLOAD_SESSION_TOO_LARGE: "upload through several sessions or reduce the file size",
-    UPLOAD_SESSION_NO_URL: "create a new upload session and restart the transfer",
     UPLOAD_SESSION_NO_NAME: "address the target file by a path ending in the file name",
 }
 

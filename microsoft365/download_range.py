@@ -84,8 +84,6 @@ RANGE_OUT_OF_BOUNDS = "range_out_of_bounds"
 RANGE_EMPTY = "range_empty"
 RANGE_FAILED = "range_failed"
 DOWNLOAD_SIZE_MISMATCH = "download_size_mismatch"
-RANGE_SIZE_MISMATCH = "download_size_mismatch"
-DOWNLOAD_INCOMPLETE = "download_incomplete"
 
 _ACTIONS = {
     INVALID_RANGE_SIZE: "use a range size that is a multiple of 320 KiB",
@@ -95,8 +93,6 @@ _ACTIONS = {
     RANGE_OUT_OF_BOUNDS: "re-read the item metadata and retry the download",
     RANGE_EMPTY: "retry the download; a range returned no bytes",
     RANGE_FAILED: "retry the download; already read ranges are re-fetched",
-    RANGE_SIZE_MISMATCH: "re-read the item metadata and retry the download",
-    DOWNLOAD_INCOMPLETE: "the transfer ended before every declared byte was read",
 }
 
 FetchSeam = Callable[..., bytes]

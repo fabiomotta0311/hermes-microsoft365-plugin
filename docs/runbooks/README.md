@@ -1,6 +1,10 @@
 # Operational runbooks
 
-These runbooks apply to the Alpha-only `v0.1.0a2` pre-release. They describe safe local triage and release operations, not tenant verification or production support.
+These runbooks apply to the `pro/microsoft365-plugin` line. They describe safe local triage, the
+tenant acceptance procedure, and release operations. Running the tenant smoke runbook against an
+authorised tenant is the only thing that turns a permission claim into evidence; the other
+runbooks describe how to operate and recover, and none of them confers production support on a
+deployment that has not run it.
 
 ## Safety rules
 
@@ -12,7 +16,7 @@ These runbooks apply to the Alpha-only `v0.1.0a2` pre-release. They describe saf
 ## Runbooks
 
 - [Consent and tenant readiness](consent.md)
-- [Tenant smoke test](tenant-smoke.md): sanitized read verification and gated write procedure
+- [Tenant smoke test](tenant-smoke.md): the acceptance procedure -- configuration, minimal reads, large transfers in both directions, reversible writes, delegated auth, and the Teams inbound loop, with per-status triage
 - [Graph response status triage](graph-errors.md): 401, 403, 404, 409, 412, 429, and 5xx
 - [Rollback](rollback.md)
 - [Incident response](incident-response.md)
