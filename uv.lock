@@ -593,7 +593,7 @@ requires-dist = [
     { name = "azure-identity", specifier = "==1.25.3" },
     { name = "detect-secrets", marker = "extra == 'test'", specifier = "==1.5.0" },
     { name = "microsoft-kiota-abstractions", specifier = "==1.12.3" },
-    { name = "microsoft-kiota-http", specifier = "==1.12.3" },
+    { name = "microsoft-kiota-http", specifier = "==1.14.1" },
     { name = "microsoft-kiota-serialization-json", specifier = "==1.12.3" },
     { name = "msgraph-sdk", specifier = "==1.62.0" },
     { name = "pip-audit", marker = "extra == 'test'", specifier = "==2.9.0" },
@@ -736,7 +736,7 @@ wheels = [
 
 [[package]]
 name = "microsoft-kiota-http"
-version = "1.12.3"
+version = "1.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx", extra = ["http2"] },
@@ -744,9 +744,9 @@ dependencies = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/6b/efb612761dd1f24e2018951591ac75bc7fe740413cec149ee3222be58743/microsoft_kiota_http-1.12.3.tar.gz", hash = "sha256:42a441de951c5f2d5e292663238018ea0b9e01e7c20715d58f14c44040b42f58", size = 22552, upload-time = "2026-09-11T18:42:38.858Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/2b/c6d4e8a71f2fa45fe0943039142e76dcdf766c50caa9e2f2fb1edd43e0ff/microsoft_kiota_http-1.14.1.tar.gz", hash = "sha256:e1766c8b34eb9fa1af016df22ccfb10ab67da2a51757bb850b1d21ab526637c5", size = 24680, upload-time = "2026-09-25T21:15:20.801Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/55/9e95bda1d3a9d9827d7e5d779952a7b677e81b28acfefca0036ccf681dab/microsoft_kiota_http-1.12.3-py3-none-any.whl", hash = "sha256:362d82292016de0641cadcecea8055ca0cfda06390448ce7347a352bd582f006", size = 32074, upload-time = "2026-09-11T18:42:46.425Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/69/444fd616294b0ac24f132bf016d2ff49ff156b083a97c9f069861899d69c/microsoft_kiota_http-1.14.1-py3-none-any.whl", hash = "sha256:e1a629bada988ff3ac8148cd09a309004f4dcab4f62a4b9981d4f2cd7320024a", size = 35752, upload-time = "2026-09-25T21:15:28.466Z" },
 ]
 
 [[package]]
