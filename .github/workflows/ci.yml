@@ -50,7 +50,7 @@ jobs:
           import importlib.metadata as metadata
           expected = {
               "hermes-agent": "0.21.3",
-              "msgraph-sdk": "1.62.0",
+              "msgraph-sdk": "1.63.0",
               "azure-identity": "1.25.3",
               "microsoft-kiota-abstractions": "1.12.3",
               "microsoft-kiota-http": "1.14.1",
