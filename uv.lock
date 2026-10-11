@@ -594,7 +594,7 @@ requires-dist = [
     { name = "detect-secrets", marker = "extra == 'test'", specifier = "==1.5.0" },
     { name = "microsoft-kiota-abstractions", specifier = "==1.14.2" },
     { name = "microsoft-kiota-http", specifier = "==1.14.1" },
-    { name = "microsoft-kiota-serialization-json", specifier = "==1.12.3" },
+    { name = "microsoft-kiota-serialization-json", specifier = "==1.14.2" },
     { name = "msgraph-sdk", specifier = "==1.63.0" },
     { name = "pip-audit", marker = "extra == 'test'", specifier = "==2.10.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = "==9.1.1" },
@@ -763,14 +763,14 @@ wheels = [
 
 [[package]]
 name = "microsoft-kiota-serialization-json"
-version = "1.12.3"
+version = "1.14.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "microsoft-kiota-abstractions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/66/7e/0426e20abd1e41e9bcb8f4f0d657ac519fd2dcec2880f2f60e11b83cfb2f/microsoft_kiota_serialization_json-1.12.3.tar.gz", hash = "sha256:39088e5a844d2c6009bee9b021e238a89fc53de4b1117d1cf67a7a0810f133c4", size = 10171, upload-time = "2026-09-11T18:42:41.079Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/88/0e06f2565e3c1e934832c14e5025fd433c2f01db972f0bd6d46f0c8a4b04/microsoft_kiota_serialization_json-1.14.2.tar.gz", hash = "sha256:b48f944ac4c671b651ebb5638df3f21f8e1972d82490f5e3c380a63a54d6bd50", size = 10253, upload-time = "2026-10-05T13:08:04.846Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4d/33/602023056a3db7944811eb268114e3697dd5c1c7b6dfa13f658e19758505/microsoft_kiota_serialization_json-1.12.3-py3-none-any.whl", hash = "sha256:935f699fc318dbfc3b5f915338d8c165902fa01325500f20ab1a68383dbbe7a4", size = 11819, upload-time = "2026-09-11T18:42:48.254Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/a4/d472b8b2662914999928600d97469af3fcde8097bcc25059c706093b8c47/microsoft_kiota_serialization_json-1.14.2-py3-none-any.whl", hash = "sha256:028d44cb5c5962add0e5e75daf96cb97038444bb9a4c4842211575421339f0e6", size = 11896, upload-time = "2026-10-05T13:08:13.363Z" },
 ]
 
 [[package]]

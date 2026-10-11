@@ -16,7 +16,7 @@ dependencies = [
   "azure-identity==1.26.0",
   "microsoft-kiota-abstractions==1.14.2",
   "microsoft-kiota-http==1.14.1",
-  "microsoft-kiota-serialization-json==1.12.3",
+  "microsoft-kiota-serialization-json==1.14.2",
 ]
 
 [project.optional-dependencies]
