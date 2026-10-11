@@ -11,7 +11,7 @@ requires_hermes: ">=0.21.3,<0.22"
 tags: [microsoft365, graph, outlook, onedrive, sharepoint, calendar, teams, todo, planner]
 python_dependencies:
   - "msgraph-sdk==1.62.0"
-  - "azure-identity==1.25.3"
+  - "azure-identity==1.26.0"
   - "microsoft-kiota-abstractions==1.14.2"
   - "microsoft-kiota-http==1.12.3"
   - "microsoft-kiota-serialization-json==1.12.3"
