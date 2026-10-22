@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.27.0"]
+requires = ["hatchling==1.32.4"]
 build-backend = "hatchling.build"
 
 [project]
@@ -12,20 +12,20 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "Fabio Motta"}]
 dependencies = [
-  "msgraph-sdk==1.62.0",
-  "azure-identity==1.25.3",
-  "microsoft-kiota-abstractions==1.12.3",
-  "microsoft-kiota-http==1.12.3",
-  "microsoft-kiota-serialization-json==1.12.3",
+  "msgraph-sdk==1.64.0",
+  "azure-identity==1.26.0",
+  "microsoft-kiota-abstractions==1.14.2",
+  "microsoft-kiota-http==1.14.2",
+  "microsoft-kiota-serialization-json==1.14.2",
 ]
 
 [project.optional-dependencies]
 test = [
   "fastapi==0.115.6",
   "pytest==9.1.1",
-  "pytest-cov==6.2.1",
+  "pytest-cov==7.1.0",
   "detect-secrets==1.5.0",
-  "pip-audit==2.9.0",
+  "pip-audit==2.10.1",
 ]
 
 [project.entry-points."hermes_agent.plugins"]
