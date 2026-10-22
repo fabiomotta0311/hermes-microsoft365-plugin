@@ -21,6 +21,16 @@ def _declared_package_version() -> str:
     return project["version"]
 
 
+def _package_dependencies() -> list[str]:
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+    return list(project["dependencies"])
+
+
+def _manifest_dependencies() -> list[str]:
+    manifest = yaml.safe_load(Path("microsoft365/plugin.yaml").read_text(encoding="utf-8"))
+    return list(manifest["python_dependencies"])
+
+
 def _installed_distribution_is_this_checkout(distribution: md.Distribution) -> bool:
     direct_url = distribution.read_text("direct_url.json")
     if not direct_url:
@@ -118,6 +128,26 @@ def test_manifest_declares_the_union_of_default_and_maximum_registrations():
         "microsoft365_todo",
         "microsoft365_planner",
     }
+
+
+def test_manifest_dependency_pins_match_the_package_dependencies():
+    """The manifest and the package must declare the same runtime dependencies.
+
+    The manifest is what the host reads to install the plugin's runtime
+    dependencies, and ``pyproject.toml`` is what the wheel is built from. When the two
+    disagree, the plugin is installed with one set of pins and shipped with another --
+    a drift that no version-pinning assertion catches, because each file is correct on
+    its own. Asserting the *relationship* rather than a literal version is what makes
+    the class of drift fail: the next bump has to move both files together.
+    """
+    package = _package_dependencies()
+    manifest = _manifest_dependencies()
+
+    assert set(manifest) == set(package), (
+        "microsoft365/plugin.yaml and pyproject.toml declare different runtime "
+        f"dependencies; manifest-only={sorted(set(manifest) - set(package))}, "
+        f"package-only={sorted(set(package) - set(manifest))}"
+    )
 
 
 def test_declared_versions_agree_with_package_metadata():
