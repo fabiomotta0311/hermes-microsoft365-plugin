@@ -46,14 +46,19 @@ Guarantees
   SDK/Azure exception text is never copied into the message; the original exception is
   only chained as ``__cause__`` for local debugging.
 * The seam is deliberately not async: it is the one boundary a synchronous tool handler
-  calls. Handlers are synchronous and call ``execute_request``; ``run_async`` refuses to
-  nest inside a running event loop (typed ``internal_error``) instead of deadlocking, so
-  an ``async`` handler must never call the seam from inside its own coroutine.
+  calls. Handlers are synchronous and call ``execute_request``; ``run_async`` runs the
+  coroutine on a private event loop. When the calling thread already has a running loop
+  -- the host's default ``plugins.isolation: in_process`` invokes plugin handlers on such
+  a thread -- the coroutine runs on a worker thread with its own loop and the caller's
+  contextvars copied across, which is the branch the host itself takes
+  (``model_tools._run_async``). The seam never deadlocks and never blocks a running
+  loop's thread on a coroutine it owns.
 """
 from __future__ import annotations
 
 import asyncio
 import inspect
+import threading
 
 from kiota_abstractions.request_adapter import RequestAdapter
 
@@ -68,6 +73,29 @@ from .errors import (
 
 _HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 _CALLER_NAMES = {method: method.lower() for method in _HTTP_METHODS}
+
+#: Upper bound on a single seam call executed on a worker thread. The host uses the
+#: same bound for its own equivalent branch, so a stuck Graph call is bounded here too
+#: rather than blocking the caller's thread forever.
+_WORKER_TIMEOUT_SECONDS = 300
+
+#: Marks the thread that is currently running a coroutine this module started.
+#:
+#: The seam has two callers with opposite requirements, and ``asyncio.get_running_loop()``
+#: alone cannot tell them apart:
+#:
+#: * the **host's** loop -- Hermes invokes plugin tool handlers on a thread that already
+#:   owns a running loop under the default ``plugins.isolation: in_process``. The call
+#:   must succeed there; failing closed made every live call fail before any Microsoft
+#:   traffic (issue #16).
+#: * **this module's own** loop -- a handler that awaits the seam from inside a coroutine
+#:   the seam started. Running that inner call on a worker would await a coroutine from a
+#:   coroutine, which the seam does not support: the inner awaitable belongs to a
+#:   transport already bound to the outer loop.
+#:
+#: The marker is set only while this module's own coroutine is in flight, so the second
+#: case is still refused instead of silently changing shape.
+_OWN_LOOP = threading.local()
 
 
 class ExecutionError(GraphError):
@@ -112,6 +140,80 @@ def _sanitized(category: str, exc: BaseException) -> ExecutionError:
     )
 
 
+def _run_in_worker_thread(awaitable, *, category: str):
+    """Run ``awaitable`` to completion on a private loop in a worker thread.
+
+    This is the branch Hermes itself takes when a synchronous caller already has a
+    running event loop (``model_tools._run_async``). The host invokes plugin tool
+    handlers on a thread that owns a running loop under the default
+    ``plugins.isolation: in_process``, so this is not a misuse of the seam -- it is
+    the ordinary deployment. Failing closed there made every live call fail before
+    any Microsoft traffic (issue #16).
+
+    The worker's contextvars are copied from the caller's, so the profile and the
+    approval/sudo callbacks of the calling thread still resolve on the worker's
+    thread. The worker owns its own loop and closes it, so no loop, client or
+    credential is shared between calls -- the guarantee the seam documents.
+
+    A failure inside the worker is converted by the same taxonomy as a failure on the
+    direct path: the caller sees a sanitized :class:`ExecutionError`, and the raw text
+    stays in ``__cause__``.
+    """
+    import concurrent.futures
+    import contextvars
+
+    context = contextvars.copy_context()
+    worker_loop: list = []
+
+    def _runner():
+        loop = asyncio.new_event_loop()
+        worker_loop.append(loop)
+        # The worker runs *this module's* coroutine, so the marker is set here too:
+        # a handler that awaits the seam from inside it is still refused.
+        _OWN_LOOP.depth = getattr(_OWN_LOOP, "depth", 0) + 1
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(awaitable)
+        finally:
+            _OWN_LOOP.depth -= 1
+            try:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
+            except Exception:
+                pass
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = pool.submit(context.run, _runner)
+        return future.result(timeout=_WORKER_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError as exc:
+        # The worker is stuck; cancel inside its own loop so the thread can wind down
+        # instead of leaking a running loop behind a failed call.
+        if worker_loop:
+            try:
+                for task in asyncio.all_tasks(worker_loop[0]):
+                    worker_loop[0].call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                pass
+        raise ExecutionError(
+            "transport_error", MESSAGES["transport_error"]
+        ) from exc
+    except ExecutionError:
+        raise
+    except Exception as exc:
+        converted = to_graph_error(exc, category=classify_upstream(exc, default=category))
+        raise _sanitized(converted.category, converted) from exc
+    finally:
+        pool.shutdown(wait=False)
+
+
 def run_async(awaitable, *, category: str = "service_error"):
     """Run ``awaitable`` to completion on a private event loop.
 
@@ -132,13 +234,25 @@ def run_async(awaitable, *, category: str = "service_error"):
     except RuntimeError:
         pass
     else:
-        close = getattr(awaitable, "close", None)
-        if callable(close):
-            close()
-        raise ExecutionError(
-            "internal_error", "cannot block on an async graph call inside a running event loop"
-        )
+        if getattr(_OWN_LOOP, "depth", 0) > 0:
+            # The running loop belongs to *this module*: a handler awaited the seam
+            # from inside a coroutine the seam started. The inner awaitable is bound
+            # to that loop's transport, so it must not be moved to another one -- and
+            # awaiting it from a coroutine is the shape the seam does not support.
+            close = getattr(awaitable, "close", None)
+            if callable(close):
+                close()
+            raise ExecutionError(
+                "internal_error", "cannot block on an async graph call inside a running event loop"
+            )
+        # The running loop belongs to the *host*: Hermes invokes plugin tool handlers
+        # on a thread that owns a loop under the default
+        # ``plugins.isolation: in_process``. That is the ordinary deployment, not
+        # misuse, so the call goes to a worker thread with its own loop instead of
+        # failing closed (issue #16).
+        return _run_in_worker_thread(awaitable, category=category)
 
+    _OWN_LOOP.depth = getattr(_OWN_LOOP, "depth", 0) + 1
     try:
         return asyncio.run(awaitable)
     except ExecutionError:
@@ -146,6 +260,8 @@ def run_async(awaitable, *, category: str = "service_error"):
     except Exception as exc:
         converted = to_graph_error(exc, category=classify_upstream(exc, default=category))
         raise _sanitized(converted.category, converted) from exc
+    finally:
+        _OWN_LOOP.depth -= 1
 
 
 def request_information_sender(builder, *, method, configuration=None, body=None):
