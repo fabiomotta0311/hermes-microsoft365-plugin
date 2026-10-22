@@ -55,7 +55,7 @@ def test_manifest_is_standalone_complete_and_secret_safe():
         "secret": True,
     }]
     assert "client_secret" not in manifest["config_schema"]
-    assert manifest["python_dependencies"][0] == "msgraph-sdk==1.62.0"
+    assert manifest["python_dependencies"][0] == "msgraph-sdk==1.64.0"
 
 
 def test_manifest_tools_match_registration_without_capability_configuration():
