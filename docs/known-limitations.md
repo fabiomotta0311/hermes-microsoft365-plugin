@@ -54,7 +54,9 @@ This document states the boundary of the first standalone milestone. It is not r
 
 ## Host dependency
 
-Hermes currently has a generic approval modification-order defect described in the governing plan: an earlier hook can modify arguments after another hook evaluated approval against different arguments. This repository does not add a Microsoft-specific workaround. Write execution must remain disabled until the separate generic Hermes core fix binds approval to the final arguments that execute.
+At upstream main commit [`c004ce241c3aebe999934bdb9b7b1224ec22a516`](https://github.com/NousResearch/hermes-agent/commit/c004ce241c3aebe999934bdb9b7b1224ec22a516), the shared approval gate contains a consent allowlist and answer normalization, added by [PR #155377](https://github.com/NousResearch/hermes-agent/pull/155377). This is evidence of a shared-gate improvement, not proof that every approval path or supported host release has been verified. The separate Codex-helper [PR #114563](https://github.com/NousResearch/hermes-agent/pull/114563) alone does not establish that shared-gate invariant.
+
+Final-argument approval remains a separate prerequisite: the generic host must bind the human decision to the arguments ultimately executed, including after execution middleware. [PR #121005](https://github.com/NousResearch/hermes-agent/pull/121005) is a candidate, not a released compatibility guarantee. This repository does not add a Microsoft-specific workaround. Keep writes non-executable until both protections are verified on the exact supported host build, along with operation-specific and authorized tenant evidence. The manifest currently declares `>=0.21.3,<0.22`; presence of a change on upstream main does not prove it is in any host in that range.
 
 ## Files and pagination
 
@@ -65,6 +67,6 @@ Hermes currently has a generic approval modification-order defect described in t
 
 ## Delivery
 
-- The repository has a SHA-pinned catalog proposal in upstream PR #114530, but it is not official until that PR is merged.
+- The community catalog entry merged in [PR #114530](https://github.com/NousResearch/hermes-agent/pull/114530) pins version `0.1.0a4` to commit `4fdc64c02c92e155df570c030f6d3c53d5361e23`; it does not automatically publish or validate later repository changes.
 - Plugin validation/doctor are CI gates only where the pinned Hermes release exposes the commands compatibly.
 - No production support or remote tenant behavior is claimed; the current release remains pre-release.
