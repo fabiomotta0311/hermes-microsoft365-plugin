@@ -4,11 +4,11 @@ This document states the boundary of the first standalone milestone. It is not r
 
 ## Runtime and authentication
 
-- Only application/client-credentials client construction is implemented. Delegated OAuth, secure delegated token caching, and account-selection UX remain open.
-- Exactly eighteen reads are executable in the current application-mode matrix, plus the explicitly gated `outlook.create_draft`, `outlook.send` and `sharepoint.upload_files` writes; all remote verification remains pending.
+- Application/client-credentials and delegated device-code OAuth client construction are implemented; delegated token storage uses an OS-protected persistent cache.
+- Selected writes are included in the executable registry, but must not be operated or promoted on a host without verified CORE-1/CORE-2 protections. Listing them here is not evidence that either host gate is present.
 - Authentication, tenant consent, endpoint permissions, throttling, pagination, and write cleanup have not been tested against an authorized test tenant.
-- Operations lacking a strict executable contract remain in the administrative registry and preflight status; they are not deleted and are not registered in active action enums. The eighteen verified reads plus the gated `outlook.create_draft` pilot are executable in application mode. Other writes stay non-executable until separately promoted.
-- Microsoft Search chat-message support and large-file transfer sessions require further endpoint-specific work.
+- Operations lacking a strict executable contract remain in the administrative registry and preflight status; they are not deleted and are not registered in active action enums.
+- Large-file upload sessions and ranged downloads are implemented offline; tenant behavior remains unverified.
 
 ## Planner
 

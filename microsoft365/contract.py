@@ -831,10 +831,9 @@ MESSAGING_OPERATIONS: tuple[str, ...] = (
     "calendar.update_events",
 )
 
-#: The operations this milestone exposes to the model: the three verified reads whose handler,
-#: contract case and endpoint row all exist. It is deliberately a literal, not a derivation:
-#: exposing an operation is a decision, and every write stays non-executable until the generic
-#: host approval fix (CORE-1/CORE-2) is available in a supported Hermes release (R5, D1).
+#: Operations this milestone exposes to the model. This literal includes selected writes;
+#: their presence does not establish that the host approval boundary is safe. Operational use
+#: of writes requires a supported host with both CORE-1/CORE-2 protections verified.
 EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "outlook.search",
     "outlook.read",
