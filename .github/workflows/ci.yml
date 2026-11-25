@@ -51,10 +51,15 @@ jobs:
           expected = {
               "hermes-agent": "0.21.3",
               "msgraph-sdk": "1.64.0",
+              "msgraph-core": "1.5.1",
               "azure-identity": "1.26.0",
               "microsoft-kiota-abstractions": "1.14.2",
+              "microsoft-kiota-authentication-azure": "1.12.3",
               "microsoft-kiota-http": "1.14.2",
+              "microsoft-kiota-serialization-form": "1.12.3",
               "microsoft-kiota-serialization-json": "1.14.2",
+              "microsoft-kiota-serialization-multipart": "1.12.3",
+              "microsoft-kiota-serialization-text": "1.12.3",
           }
           for package, version in expected.items():
               actual = metadata.version(package)
@@ -82,7 +87,7 @@ jobs:
         run: |
           python -m venv "$RUNNER_TEMP/hermes-m365-audit"
           audit_python="$RUNNER_TEMP/hermes-m365-audit/bin/python"
-          "$audit_python" -m pip install --disable-pip-version-check --upgrade pip setuptools "pip-audit==2.9.0"
+          "$audit_python" -m pip install --disable-pip-version-check --upgrade pip setuptools "pip-audit==2.10.1"
           "$audit_python" -m pip install --disable-pip-version-check dist/*.whl
           "$audit_python" -m pip check
           "$audit_python" -m pip_audit --progress-spinner off
