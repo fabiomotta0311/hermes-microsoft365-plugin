@@ -1122,4 +1122,26 @@ def test_client_builds_delegated_device_code_client_with_selected_scopes(monkeyp
     assert result == "client"
     assert captured["cache"]["allow_unencrypted_storage"] is False
     assert captured["credential"]["cache_persistence_options"] == "cache"
-    assert captured["client"]["scopes"] == ["openid", "profile", "offline_access", "Mail.Read"]
+    assert captured["client"]["scopes"] == ["Mail.Read"]
+
+
+def test_delegated_scopes_cross_real_msal_device_flow_boundary_offline(monkeypatch):
+    import azure.identity
+    import msal
+    import msgraph
+    from types import SimpleNamespace
+    from microsoft365.client import create_graph_client
+    from microsoft365.contract import Settings
+
+    captured = {}
+    monkeypatch.setattr(azure.identity, "TokenCachePersistenceOptions", lambda **kw: None)
+    monkeypatch.setattr(azure.identity, "DeviceCodeCredential", lambda **kw: None)
+    monkeypatch.setattr(msgraph, "GraphServiceClient", lambda **kw: captured.update(kw))
+    create_graph_client(Settings(authentication_mode="delegated", tenant_id="tenant", client_id="client",
+                                 capabilities={"outlook": {"search": True}}))
+    app = msal.PublicClientApplication.__new__(msal.PublicClientApplication)
+    app._exclude_scopes = set()
+    app._client_capabilities = None
+    app.client = SimpleNamespace(initiate_device_flow=lambda **kw: captured.update(flow=kw) or {})
+    app.initiate_device_flow(scopes=captured["scopes"])
+    assert set(captured["flow"]["scope"]) == {"Mail.Read", "openid", "profile", "offline_access"}

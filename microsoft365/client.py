@@ -13,7 +13,6 @@ from .preflight import SECRET_ENV_NAME
 
 GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default"
 DELEGATED_CACHE_NAME = "hermes-microsoft365"
-DELEGATED_BASE_SCOPES = ("openid", "profile", "offline_access")
 
 
 def _delegated_client(settings: Settings):
@@ -25,7 +24,8 @@ def _delegated_client(settings: Settings):
     """
     if not settings.tenant_id or not settings.client_id:
         raise _failure("configuration_error")
-    scopes = tuple(dict.fromkeys((*DELEGATED_BASE_SCOPES, *delegated_scopes(settings))))
+    # MSAL owns OIDC reserved scopes and rejects them in caller-supplied scopes.
+    scopes = tuple(dict.fromkeys(delegated_scopes(settings)))
     if not scopes:
         raise _failure("configuration_error")
     from azure.identity import DeviceCodeCredential, TokenCachePersistenceOptions

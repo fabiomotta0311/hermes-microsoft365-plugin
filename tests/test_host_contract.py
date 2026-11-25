@@ -199,9 +199,7 @@ def test_the_plugin_dispatch_boundary_keeps_a_string_payload_untouched(monkeypat
 def test_the_plugin_dispatch_boundary_survives_a_payload_json_cannot_represent(monkeypatch):
     """A value the JSON encoder cannot represent becomes a readable result, not a crash.
 
-    ``default=str`` is what makes this hold: a payload can legitimately carry a
-    ``datetime``, a ``Path`` or an SDK object, and the failure mode we want at the
-    boundary is a readable result rather than a ``TypeError`` escaping into the host.
+    Unknown values use a fixed marker instead of invoking application code.
     """
     from microsoft365 import registration
 
@@ -218,7 +216,23 @@ def test_the_plugin_dispatch_boundary_survives_a_payload_json_cannot_represent(m
     outcome = registration.service_tool_handler("outlook", {"action": "search"})
 
     assert isinstance(outcome, str)
-    assert json.loads(outcome)["value"] == "opaque-value"
+    assert json.loads(outcome)["value"] == "[unsupported value]"
+
+
+def test_opaque_objects_never_run_string_or_repr(monkeypatch):
+    from microsoft365 import registration
+
+    class Hostile:
+        def __str__(self):
+            raise AssertionError("must not stringify")
+
+        def __repr__(self):
+            raise AssertionError("must not repr")
+
+    monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.search",
+                        lambda args: {"nested": [Hostile()]})
+    result = registration.service_tool_handler("outlook", {"action": "search"})
+    assert json.loads(result) == {"nested": ["[unsupported value]"]}
 
 
 def test_the_plugin_dispatch_boundary_preserves_the_multimodal_envelope(monkeypatch):
