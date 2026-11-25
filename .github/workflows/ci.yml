@@ -82,7 +82,7 @@ jobs:
         run: |
           python -m venv "$RUNNER_TEMP/hermes-m365-audit"
           audit_python="$RUNNER_TEMP/hermes-m365-audit/bin/python"
-          "$audit_python" -m pip install --disable-pip-version-check --upgrade pip setuptools "pip-audit==2.9.0"
+          "$audit_python" -m pip install --disable-pip-version-check --upgrade pip setuptools "pip-audit==2.10.1"
           "$audit_python" -m pip install --disable-pip-version-check dist/*.whl
           "$audit_python" -m pip check
           "$audit_python" -m pip_audit --progress-spinner off

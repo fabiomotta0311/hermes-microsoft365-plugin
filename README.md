@@ -58,7 +58,7 @@ request-contract support only while the host write-approval dependency remains u
 
 ## Verification boundary
 
-The test suite is offline. It uses `msgraph-sdk==1.62.0` generated request builders, generated models, Kiota `RequestInformation`, and a strict transport-boundary adapter. It verifies typed request configurations for representative Outlook, Calendar, To Do, drive, Teams, and Planner collections; real collection response normalization; complete binary base64 preservation; strict capability parsing; schema registration; and scoped secret access.
+The test suite is offline. It uses `msgraph-sdk==1.64.0` generated request builders, generated models, Kiota `RequestInformation`, and a strict transport-boundary adapter. It verifies typed request configurations for representative Outlook, Calendar, To Do, drive, Teams, and Planner collections; real collection response normalization; complete binary base64 preservation; strict capability parsing; schema registration; and scoped secret access.
 
 This does **not** verify tenant authentication, consent, endpoint permissions, throttling, pagination against Graph, or mutation behavior in a remote tenant.
 
@@ -68,8 +68,8 @@ See [Known limitations](docs/known-limitations.md). In particular:
 
 - delegated authentication uses Azure Identity device-code OAuth with an OS-protected persistent token cache;
 - operations without strict executable contracts stay in preflight as `not_implemented` or `not_verified` and are not model-facing;
-- no workaround is included for the Hermes host approval modification-order defect; safe write execution depends on the separate generic core fix;
-- the catalog entry is proposed in PR #114530 and remains pending upstream admission; this pre-release makes no tenant or production-support claim.
+- keep writes disabled unless the exact deployed Hermes host has independently verified fail-closed approval decisions and final-argument binding after all modifiers; the included experimental patch is not proof of a released, compatible host;
+- the community catalog entry was merged in [Hermes PR #114530](https://github.com/NousResearch/hermes-agent/pull/114530); it does not establish that this PRO branch is cataloged, tenant-verified, or production-ready.
 
 ## Version
 
