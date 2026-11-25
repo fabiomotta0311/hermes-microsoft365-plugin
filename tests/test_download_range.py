@@ -6,18 +6,22 @@ implementation would have silently accepted as complete.
 """
 from __future__ import annotations
 
+import base64
 from urllib.parse import urlsplit
 
+import httpx
 import pytest
 from kiota_abstractions.request_adapter import RequestAdapter
 
 from microsoft365 import execution
 from microsoft365.download_range import (
     DEFAULT_RANGE_SIZE,
+    DOWNLOAD_URL_FIELD,
     MAX_DOWNLOAD_BYTES,
     MAX_RANGES,
     RANGE_SIZE_MULTIPLE,
     SIMPLE_TRANSFER_LIMIT_BYTES,
+    SMALL_DOWNLOAD_BUDGET_BYTES,
     DownloadRangeError,
     RangeOutcome,
     download_file_auto,
@@ -429,17 +433,80 @@ def _no_wait_execute(adapter: RequestAdapter):
     return functools.partial(execution.execute_request, adapter=adapter, sleep=lambda seconds: None)
 
 
-def test_a_small_file_also_fails_closed_until_bounded_streaming_exists():
-    """The declared-size fast path was the defect: the SDK can buffer unboundedly regardless
-    of what metadata declares, so every size -- not just large ones -- fails closed."""
-    capture = []
-    adapter, _ = ranged_adapter(2048, capture=capture)
-    with pytest.raises(DownloadRangeError) as exc:
-        download_file_auto(_drive_client(adapter), drive_id="drive-1", path="small.bin")
-    assert exc.value.status == "download_range_not_implemented"
-    assert exc.value.size_bytes == 2048
-    # Metadata is read (for the refusal's reported size) but no content request is issued.
-    assert capture == [("metadata", None)]
+def _drive_item(
+    *,
+    item_id: str = "item-1",
+    name: str = "small.bin",
+    size: int,
+    etag: str = "etag-1",
+    download_url: str = "https://blob.example.test/download",
+):
+    """A ``DriveItem`` carrying the identity/URL fields the small-file path reads."""
+    from msgraph.generated.models.drive_item import DriveItem
+    from msgraph.generated.models.file import File as DriveFile
+
+    item = DriveItem(
+        id=item_id, name=name, size=size, e_tag=etag,
+        file=DriveFile(mime_type="application/octet-stream"),
+    )
+    item.additional_data = {DOWNLOAD_URL_FIELD: download_url}
+    return item
+
+
+def _metadata_adapter(items: list):
+    """Serve one ``DriveItem`` per metadata GET, in order; the last repeats once exhausted."""
+    calls = {"count": 0}
+
+    def responder(request_information):
+        index = min(calls["count"], len(items) - 1)
+        calls["count"] += 1
+        return items[index]
+
+    return _Adapter(responder)
+
+
+def _mock_http_client(handler):
+    """A factory of isolated ``httpx.Client``s over ``httpx.MockTransport`` -- no network."""
+
+    def factory():
+        return httpx.Client(
+            transport=httpx.MockTransport(handler), trust_env=False, follow_redirects=False
+        )
+
+    return factory
+
+
+# --------------------------------------------------------------------------- download_file_auto
+
+
+def test_a_small_file_downloads_through_the_bounded_streaming_transport():
+    """Success path: metadata -> preauthenticated URL -> ranged GET -> re-verified metadata."""
+    payload = drive_payload(2048)
+    item = _drive_item(size=len(payload))
+    adapter = _metadata_adapter([item, item])
+    requests_seen: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests_seen.append(request)
+        assert request.headers.get("range") == f"bytes=0-{len(payload) - 1}"
+        assert "authorization" not in request.headers
+        assert "cookie" not in request.headers
+        return httpx.Response(
+            206,
+            headers={"Content-Range": f"bytes 0-{len(payload) - 1}/{len(payload)}"},
+            content=payload,
+        )
+
+    result = download_file_auto(
+        _drive_client(adapter),
+        drive_id="drive-1",
+        path="small.bin",
+        execute=_no_wait_execute(adapter),
+        http_client_factory=_mock_http_client(handler),
+    )
+    assert base64.b64decode(result.content_base64) == payload
+    assert result.size == len(payload)
+    assert len(requests_seen) == 1
 
 
 def test_large_download_fails_closed_before_any_content_request():
@@ -451,14 +518,166 @@ def test_large_download_fails_closed_before_any_content_request():
     assert capture == [("metadata", None)]
 
 
-def test_injected_fetch_cannot_bypass_large_download_guard():
+def test_a_large_download_never_opens_the_http_transport():
+    """The budget guard runs before the transport factory is even called."""
     capture = []
     adapter, _ = ranged_adapter(12 * MB, capture=capture)
-    def forbidden(*args, **kwargs):
-        pytest.fail("experimental fetch must not be called")
+
+    def forbidden_factory():
+        pytest.fail("the http transport must not be opened above the small-file budget")
+
     with pytest.raises(DownloadRangeError) as exc:
-        download_file_auto(_drive_client(adapter), drive_id="drive-1", path="big.bin",
-                           fetch=forbidden, range_size=RANGE_SIZE_MULTIPLE)
-    assert exc.value.category == "operation_not_implemented"
+        download_file_auto(
+            _drive_client(adapter), drive_id="drive-1", path="big.bin",
+            http_client_factory=forbidden_factory,
+        )
     assert exc.value.status == "download_range_not_implemented"
     assert capture == [("metadata", None)]
+
+
+def test_an_ignored_range_returning_200_is_refused_not_silently_accepted():
+    """A server that ignores Range answers 200 with the whole file; this must be refused."""
+    payload = drive_payload(1024)
+    item = _drive_item(size=len(payload))
+    adapter = _metadata_adapter([item, item])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=payload)
+
+    with pytest.raises(DownloadRangeError) as caught:
+        download_file_auto(
+            _drive_client(adapter), drive_id="drive-1", path="small.bin",
+            execute=_no_wait_execute(adapter), http_client_factory=_mock_http_client(handler),
+        )
+    assert caught.value.status == "range_not_content_partial"
+
+
+def test_an_oversized_body_with_a_lying_content_length_is_refused_before_reading():
+    """``Content-Length`` over the budget is rejected before a single body byte is read."""
+    declared_size = 1024
+    item = _drive_item(size=declared_size)
+    adapter = _metadata_adapter([item, item])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            206,
+            headers={
+                "Content-Range": f"bytes 0-{declared_size - 1}/{declared_size}",
+                "Content-Length": str(SMALL_DOWNLOAD_BUDGET_BYTES + 4096),
+            },
+            content=b"x" * declared_size,
+        )
+
+    with pytest.raises(DownloadRangeError) as caught:
+        download_file_auto(
+            _drive_client(adapter), drive_id="drive-1", path="small.bin",
+            execute=_no_wait_execute(adapter), http_client_factory=_mock_http_client(handler),
+        )
+    assert caught.value.status == "download_too_large"
+
+
+def test_an_oversized_body_with_no_content_length_is_aborted_mid_stream():
+    """A chunked response with no ``Content-Length`` is still bounded during the read."""
+    declared_size = 1024
+    item = _drive_item(size=declared_size)
+    adapter = _metadata_adapter([item, item])
+    chunk = b"x" * MB
+    total_chunks = 5
+    chunks_yielded: list = []
+
+    def body():
+        for _ in range(total_chunks):
+            chunks_yielded.append(1)
+            yield chunk
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # No Content-Length header: httpx reports this as chunked/streamed.
+        return httpx.Response(
+            206,
+            headers={"Content-Range": f"bytes 0-{declared_size - 1}/{declared_size}"},
+            content=body(),
+        )
+
+    with pytest.raises(DownloadRangeError) as caught:
+        download_file_auto(
+            _drive_client(adapter), drive_id="drive-1", path="small.bin",
+            execute=_no_wait_execute(adapter), http_client_factory=_mock_http_client(handler),
+        )
+    assert caught.value.status == "download_too_large"
+    # Proves real streaming: the abort happened before the generator was fully drained.
+    assert len(chunks_yielded) < total_chunks
+
+
+def test_metadata_etag_changed_mid_download_is_refused():
+    payload = drive_payload(1024)
+    initial = _drive_item(size=len(payload), etag="etag-1")
+    changed = _drive_item(size=len(payload), etag="etag-2")
+    adapter = _metadata_adapter([initial, changed])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            206,
+            headers={"Content-Range": f"bytes 0-{len(payload) - 1}/{len(payload)}"},
+            content=payload,
+        )
+
+    with pytest.raises(DownloadRangeError) as caught:
+        download_file_auto(
+            _drive_client(adapter), drive_id="drive-1", path="small.bin",
+            execute=_no_wait_execute(adapter), http_client_factory=_mock_http_client(handler),
+        )
+    assert caught.value.status == "metadata_changed_mid_download"
+
+
+def test_metadata_size_changed_mid_download_is_refused():
+    payload = drive_payload(1024)
+    initial = _drive_item(size=len(payload))
+    changed = _drive_item(size=len(payload) + 1)
+    adapter = _metadata_adapter([initial, changed])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            206,
+            headers={"Content-Range": f"bytes 0-{len(payload) - 1}/{len(payload)}"},
+            content=payload,
+        )
+
+    with pytest.raises(DownloadRangeError) as caught:
+        download_file_auto(
+            _drive_client(adapter), drive_id="drive-1", path="small.bin",
+            execute=_no_wait_execute(adapter), http_client_factory=_mock_http_client(handler),
+        )
+    assert caught.value.status == "metadata_changed_mid_download"
+
+
+def test_a_redirect_from_the_preauthenticated_url_is_refused_not_followed():
+    payload = drive_payload(1024)
+    item = _drive_item(size=len(payload))
+    adapter = _metadata_adapter([item, item])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"Location": "https://attacker.example.test/d"})
+
+    with pytest.raises(DownloadRangeError) as caught:
+        download_file_auto(
+            _drive_client(adapter), drive_id="drive-1", path="small.bin",
+            execute=_no_wait_execute(adapter), http_client_factory=_mock_http_client(handler),
+        )
+    assert caught.value.status == "download_redirect_refused"
+
+
+def test_a_missing_download_url_is_refused_before_any_http_request():
+    item = _drive_item(size=1024, download_url="")
+    item.additional_data = {}
+    adapter = _metadata_adapter([item, item])
+
+    def forbidden_handler(request: httpx.Request) -> httpx.Response:
+        pytest.fail("no HTTP request should be made with no downloadUrl")
+
+    with pytest.raises(DownloadRangeError) as caught:
+        download_file_auto(
+            _drive_client(adapter), drive_id="drive-1", path="small.bin",
+            execute=_no_wait_execute(adapter),
+            http_client_factory=_mock_http_client(forbidden_handler),
+        )
+    assert caught.value.status == "download_url_unavailable"

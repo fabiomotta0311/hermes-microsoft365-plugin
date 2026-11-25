@@ -6,6 +6,18 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **Bounded-streaming small-file download.** `onedrive.download_files`/`sharepoint.download_files`
+  now actually transfer bytes for files at or under the 2 MiB small-file budget
+  (`download_range.SMALL_DOWNLOAD_BUDGET_BYTES`): authenticated metadata pins the item's
+  id/eTag, the preauthenticated `@microsoft.graph.downloadUrl` is fetched through a separate
+  `httpx` client carrying no Graph auth header, no cookies, no ambient proxy config
+  (`trust_env=False`) and no redirect following (`follow_redirects=False`), a whole-window
+  `Range` request must come back `206` with a matching `Content-Range` (a `200` is refused,
+  not silently accepted), the byte budget is enforced both on a declared `Content-Length` and
+  live during the streamed read (a chunked or lying body is aborted mid-stream), and the
+  metadata is re-read after the transfer to refuse a result whose id, eTag or size changed.
+  Anything above the small-file budget still fails closed with `download_range_not_implemented`
+  until a bounded host artifact sink exists to carry a larger file without fully buffering it.
 - **Delegated authentication.** Device-code OAuth as a first-class auth mode alongside
   application credentials, with a token cache protected by the operating system; an
   unencrypted cache is refused. Delegated scopes are derived from the enabled capability set,

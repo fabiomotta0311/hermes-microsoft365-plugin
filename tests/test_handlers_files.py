@@ -448,10 +448,11 @@ def test_read_refuses_a_traversal_path_before_any_client_work():
 # ======================================================================================
 
 
-def test_download_fails_closed_before_any_content_request():
-    """A declared-size fast path used to serve this directly; it is unsafe at every size (the
-    SDK's content builder can buffer unboundedly before the plugin can enforce a limit), so
-    the handler now fails closed right after the metadata read."""
+def test_download_without_an_etag_fails_closed_before_any_http_request():
+    """Handler-level metadata here carries no ``eTag``/``downloadUrl`` (the double only models
+    the SDK item-read contract, not Graph's real undeclared OData properties), so the
+    small-file transport refuses it before ever building an HTTP client -- never silently
+    treating a file with no verifiable identity as downloadable."""
     payload = bytes(range(256)) * 4
     adapter = HandlerGraphAdapter(
         {
@@ -463,12 +464,12 @@ def test_download_fails_closed_before_any_content_request():
     with pytest.raises(GraphError) as caught:
         run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
 
-    assert caught.value.status == "download_range_not_implemented"
+    assert caught.value.status == "metadata_without_identity"
     paths = [urlsplit(request.url).path for request in adapter.requests]
     assert paths == [ITEM_ENCODED_PATH]
 
 
-def test_download_by_id_fails_closed_after_the_metadata_read():
+def test_download_by_id_without_an_etag_fails_closed_after_the_metadata_read():
     payload = b"abc"
     adapter = HandlerGraphAdapter(
         {
@@ -480,25 +481,30 @@ def test_download_by_id_fails_closed_after_the_metadata_read():
     with pytest.raises(GraphError) as caught:
         run(ONEDRIVE_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_id": ITEM}, adapter)
 
-    assert caught.value.status == "download_range_not_implemented"
+    assert caught.value.status == "metadata_without_identity"
     assert len(adapter.requests) == 1
     assert urlsplit(adapter.requests[0].url).path == f"/drives/{DRIVE}/items/{ITEM}"
 
 
-def test_download_fails_closed_even_when_metadata_declares_a_pdf():
-    payload = b"<h1>"
+def test_download_above_the_small_file_budget_fails_closed_before_any_content_request():
+    """Above ``download_range.SMALL_DOWNLOAD_BUDGET_BYTES`` there is still no bounded host
+    artifact sink to stream into, so this remains refused regardless of identity/content type."""
+    from microsoft365.download_range import SMALL_DOWNLOAD_BUDGET_BYTES
+
+    oversized = SMALL_DOWNLOAD_BUDGET_BYTES + 1
     adapter = HandlerGraphAdapter(
         {
-            ("GET", ITEM_ENCODED_PATH): drive_item(size=4, mime_type="application/pdf", name="report.html"),
-            ("GET", f"{ITEM_ENCODED_PATH}/content"): payload,
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=oversized, mime_type="application/pdf", name="report.html"),
         }
     )
 
     with pytest.raises(GraphError) as caught:
         run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
 
-    # The fail-closed guard applies regardless of what metadata declares about content type.
     assert caught.value.status == "download_range_not_implemented"
+    paths = [urlsplit(request.url).path for request in adapter.requests]
+    assert paths == [ITEM_ENCODED_PATH]
+
 
 
 def test_upload_puts_exact_bytes_with_content_type_to_the_content_url():
