@@ -1,12 +1,15 @@
 """Experimental range helpers and the fail-closed drive download entry point.
 
-Why this module exists
-----------------------
+Status (fails closed on every size)
+------------------------------------
 :mod:`microsoft365.files` implements the one-shot ``GET /content`` transfer, whose Graph
-contract is bounded at 10 MiB. Anything larger is currently refused with
-``download_range_not_implemented``. That is the missing half of the large-file story now that
-:mod:`microsoft365.upload_session` handles the write side, and a plugin that can upload a 2 GiB
-video but not read it back is not production-ready.
+contract is bounded at 10 MiB. A declared-size fast path used to serve files at or under that
+bound directly; review found the guard insufficient because the SDK's content builder can
+buffer an unbounded response regardless of what the metadata declares, before this module
+ever gets a chance to enforce a limit. Every download -- small or large -- is refused with
+``download_range_not_implemented`` until a bounded streaming result and a version-pinned
+transport exist. The experimental range helpers below remain disconnected from the handler
+and are not a supported production transport.
 
 Experimental design (not a supported or verified production transport)
 -------------------------------------------------------------------------
@@ -55,7 +58,7 @@ from .files import (
     drive_item_address,
     validate_drive_id,
 )
-from .results import BinaryResult, binary_result
+from .results import BinaryResult
 
 #: Graph's ceiling for a single download of a drive item's contents.
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024 * 1024
@@ -326,7 +329,21 @@ def download_file_auto(
     fetch: FetchSeam | None = None,
     sleep: Callable[[float], None] | None = None,
 ) -> BinaryResult:
-    """Download within the simple bound; explicitly refuse larger files."""
+    """Fail closed on every download until a bounded streaming transport exists.
+
+    Earlier revisions issued the one-shot content GET for any file whose *declared* metadata
+    size was at or below :data:`SIMPLE_TRANSFER_LIMIT_BYTES`. That guard was insufficient: the
+    declared size only bounds how much is *allocated into the result* after the fact, not how
+    much the SDK's content builder buffers in memory while fetching the response -- a
+    metadata size can be wrong, stale or simply not representative of the actual response
+    the transport reads before this function ever sees it. There is currently no seam that
+    reads the body incrementally under a true memory bound (``BinaryResult`` buffers and
+    base64-encodes the entire file, and the generated content builder does not expose an HTTP
+    response with status and headers before it has already read the body). So every content
+    request is refused here -- small or large -- until a real bounded streaming result and a
+    version-pinned transport exist; the metadata read is still performed so the refusal can
+    report the declared size, but it is never followed by a content request.
+    """
     drive = validate_drive_id(drive_id)
     address = drive_item_address(drive_item_id=drive_item_id, path=path, identifier=identifier)
     adapter = _request_adapter(client)
@@ -337,24 +354,14 @@ def download_file_auto(
         configuration=_empty_configuration(),
         adapter=adapter,
     )
-    declared_size, mime_type, name = _declared_metadata(item)
-    if declared_size <= SIMPLE_TRANSFER_LIMIT_BYTES:
-        # The metadata read above is the same authenticated read ``download_file`` would do,
-        # so the content request is issued here instead of re-reading the item.
-        payload = execute(_content_builder(client, drive, address), method="GET", adapter=adapter)
-        return binary_result(
-            _stream_response(payload, limit_bytes=SIMPLE_TRANSFER_LIMIT_BYTES),
-            content_type=mime_type,
-            name=name,
-        )
+    declared_size, _mime_type, _name = _declared_metadata(item)
 
-    # BinaryResult buffers and base64-encodes the entire file; the SDK content
-    # builder also does not expose an HTTP response with status and headers.
-    # Until a bounded streaming result and version-pinned transport exist, do
-    # not issue content requests or call the experimental range helpers.
+    # No content request is issued for any declared size. A small-file fast path that trusted
+    # the declared size was the exact defect found in review: the SDK's content builder can
+    # buffer an unbounded response before this function gets a chance to enforce any limit.
     raise DownloadRangeError(
         "operation_not_implemented", status="download_range_not_implemented",
-        action="download a file within the 10 MiB simple-transfer limit",
+        action="downloads are unsupported until bounded streaming is implemented",
         size_bytes=declared_size, limit_bytes=SIMPLE_TRANSFER_LIMIT_BYTES,
     )
 

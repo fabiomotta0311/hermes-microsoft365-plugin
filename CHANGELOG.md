@@ -14,9 +14,10 @@ All notable changes to this project are documented here.
   upload sessions with aligned 320 KiB fragments, explicit byte ranges, `nextExpectedRanges`
   resume and a bounded attempt budget. A session that stops making progress is reported as
   `upload_session_incomplete` rather than assumed complete.
-- **Large downloads fail closed.** Files above the 10 MiB simple-transfer limit return
-  `download_range_not_implemented` without a content request. Experimental range helpers are
-  not a supported streaming transport; version verification is not implemented.
+- **Downloads fail closed at every size.** `onedrive.download_files`/`sharepoint.download_files`
+  always return `download_range_not_implemented` after the metadata read and before any
+  content request, regardless of declared size. Experimental range helpers are not a supported
+  streaming transport; version verification is not implemented.
 - **Post-write reconciliation.** Every confirmed write is re-read and reported as `confirmed`,
   `mismatched` or `unverified`; `mismatched` is never repaired or silently retried, and
   `unverified` is never promoted to `confirmed`. Callers may opt out explicitly with
@@ -75,6 +76,12 @@ All notable changes to this project are documented here.
   contract, so the documented backwards compatibility never worked. Passing `overwrite` and
   `conflict_behavior` together is now refused rather than letting one silently outrank the
   other.
+- `download_file_auto` served declared-size downloads at or under the 10 MiB simple-transfer
+  limit by issuing the content request directly. That guard was insufficient: a declared size
+  does not bound how much the SDK's content builder buffers before the plugin can enforce any
+  limit, so a small declared size did not make the path safe. Every download now fails closed
+  with `download_range_not_implemented` regardless of size, until a bounded streaming
+  transport exists.
 
 ## [0.1.0a4] - 2026-09-17
 

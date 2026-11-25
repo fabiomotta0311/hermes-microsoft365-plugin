@@ -429,20 +429,17 @@ def _no_wait_execute(adapter: RequestAdapter):
     return functools.partial(execution.execute_request, adapter=adapter, sleep=lambda seconds: None)
 
 
-def test_a_small_file_is_downloaded_in_one_request_with_no_range_header():
-    import base64
-
-    capture: list = []
-    adapter, payload = ranged_adapter(2048, capture=capture)
-    client = _drive_client(adapter)
-    result = download_file_auto(
-        client, drive_id="drive-1", path="small.bin"
-    )
-    assert result.size == 2048
-    assert result.name == "big.bin"
-    assert base64.b64decode(result.content_base64) == payload
-    # metadata + one whole-file content GET, and no ranged read was needed
-    assert [window for window in capture if window[0] != "metadata"] == [("whole", None)]
+def test_a_small_file_also_fails_closed_until_bounded_streaming_exists():
+    """The declared-size fast path was the defect: the SDK can buffer unboundedly regardless
+    of what metadata declares, so every size -- not just large ones -- fails closed."""
+    capture = []
+    adapter, _ = ranged_adapter(2048, capture=capture)
+    with pytest.raises(DownloadRangeError) as exc:
+        download_file_auto(_drive_client(adapter), drive_id="drive-1", path="small.bin")
+    assert exc.value.status == "download_range_not_implemented"
+    assert exc.value.size_bytes == 2048
+    # Metadata is read (for the refusal's reported size) but no content request is issued.
+    assert capture == [("metadata", None)]
 
 
 def test_large_download_fails_closed_before_any_content_request():

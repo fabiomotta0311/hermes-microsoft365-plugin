@@ -448,7 +448,10 @@ def test_read_refuses_a_traversal_path_before_any_client_work():
 # ======================================================================================
 
 
-def test_download_returns_exact_bytes_from_the_content_endpoint():
+def test_download_fails_closed_before_any_content_request():
+    """A declared-size fast path used to serve this directly; it is unsafe at every size (the
+    SDK's content builder can buffer unboundedly before the plugin can enforce a limit), so
+    the handler now fails closed right after the metadata read."""
     payload = bytes(range(256)) * 4
     adapter = HandlerGraphAdapter(
         {
@@ -457,17 +460,15 @@ def test_download_returns_exact_bytes_from_the_content_endpoint():
         }
     )
 
-    result = run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
+    with pytest.raises(GraphError) as caught:
+        run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
 
+    assert caught.value.status == "download_range_not_implemented"
     paths = [urlsplit(request.url).path for request in adapter.requests]
-    assert paths == [ITEM_ENCODED_PATH, f"{ITEM_ENCODED_PATH}/content"]
-    assert result["operation"] == SHAREPOINT_DOWNLOAD
-    assert result["result"]["content_type"] == MIME
-    assert result["result"]["name"] == "b.txt"
-    assert result["result"]["size"] == len(payload)
+    assert paths == [ITEM_ENCODED_PATH]
 
 
-def test_download_by_id_targets_the_same_content_endpoint():
+def test_download_by_id_fails_closed_after_the_metadata_read():
     payload = b"abc"
     adapter = HandlerGraphAdapter(
         {
@@ -476,12 +477,15 @@ def test_download_by_id_targets_the_same_content_endpoint():
         }
     )
 
-    run(ONEDRIVE_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_id": ITEM}, adapter)
+    with pytest.raises(GraphError) as caught:
+        run(ONEDRIVE_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_id": ITEM}, adapter)
 
-    assert urlsplit(adapter.requests[1].url).path == f"/drives/{DRIVE}/items/{ITEM}/content"
+    assert caught.value.status == "download_range_not_implemented"
+    assert len(adapter.requests) == 1
+    assert urlsplit(adapter.requests[0].url).path == f"/drives/{DRIVE}/items/{ITEM}"
 
 
-def test_download_content_type_comes_from_authenticated_metadata_not_the_caller():
+def test_download_fails_closed_even_when_metadata_declares_a_pdf():
     payload = b"<h1>"
     adapter = HandlerGraphAdapter(
         {
@@ -490,12 +494,11 @@ def test_download_content_type_comes_from_authenticated_metadata_not_the_caller(
         }
     )
 
-    result = run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
+    with pytest.raises(GraphError) as caught:
+        run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
 
-    # The content type is the one authenticated metadata declared, not anything the caller
-    # supplied (the download_files argument contract has no content_type at all).
-    assert result["result"]["content_type"] == "application/pdf"
-    assert result["result"]["name"] == "report.html"
+    # The fail-closed guard applies regardless of what metadata declares about content type.
+    assert caught.value.status == "download_range_not_implemented"
 
 
 def test_upload_puts_exact_bytes_with_content_type_to_the_content_url():

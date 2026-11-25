@@ -17,11 +17,13 @@ Action-specific rules this module owns (what the shared argument contract cannot
 * ``read`` addresses one drive item by an opaque ``item_id`` or a validated relative
   ``item_path``, through ``microsoft365.files.drive_item_address`` — the generated builder
   renders the path and percent-encodes it, never this module.
-* ``download_files``/``upload_files`` go through the bounded ``microsoft365/files.py``
-  transfer: exact bytes, the 10 MiB simple-transfer bound before allocation, the content type
-  of a download read from authenticated metadata only, and an upload whose size exceeds the
-  simple-transfer bound is *not* refused -- it is routed through the resumable upload session
-  in ``microsoft365/upload_session.py``, which is also what carries the explicit
+* ``download_files``/``upload_files`` go through the bounded ``microsoft365/files.py``/
+  ``microsoft365/download_range.py`` transfer. Downloads fail closed at every size pending a
+  bounded streaming transport (``download_range_not_implemented``); uploads enforce the
+  10 MiB simple-transfer bound before allocation, with the content type of a download read
+  from authenticated metadata only, and an upload whose size exceeds the simple-transfer
+  bound is *not* refused -- it is routed through the resumable upload session in
+  ``microsoft365/upload_session.py``, which is also what carries the explicit
   ``conflict_behavior`` (``replace``/``rename``/``fail``) a simple ``PUT /content`` cannot honor.
 
 The four reads above are executable; the two uploads are implemented, contract-pinned and
@@ -183,8 +185,9 @@ def _drive_download(arguments: Mapping, context: HandlerContext, *, key: str) ->
     drive_item_address(drive_item_id=arguments.get("item_id"), path=arguments.get("item_path"))
 
     client, _adapter = open_graph_client(context)
-    # ``auto`` picks the smallest mechanism that can carry the file: one GET within the simple
-    # bound; larger downloads fail closed until bounded streaming is implemented.
+    # Every download fails closed with ``download_range_not_implemented`` after the metadata
+    # read: a declared size at or under the simple-transfer bound is not a safe signal that a
+    # content request is bounded, so no size issues one until bounded streaming exists.
     result = download_file_auto(
         client,
         drive_id=drive_id,
