@@ -1130,9 +1130,9 @@ def test_dispatch_path_rejects_before_reaching_a_registered_handler(monkeypatch)
 #: The eleven reads this milestone exposes to the model.
 EXECUTABLE_READS = frozenset(
     {
-        "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
-        "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
-        "onedrive.search", "onedrive.read", "onedrive.download_files", "onedrive.upload_files",
+        "outlook.search", "outlook.read", "calendar.search",
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
@@ -1142,6 +1142,7 @@ EXECUTABLE_READS = frozenset(
 #: The remaining writes implemented but not yet executable.
 WITHHELD_WRITES = frozenset(
     {
+        "outlook.create_draft", "outlook.send", "sharepoint.upload_files", "onedrive.upload_files",
         "calendar.create_events", "calendar.update_events",
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
@@ -1270,10 +1271,10 @@ def test_hook_lets_an_executable_read_through_and_blocks_a_withheld_write():
         )
         is None
     )
-    # Promoted writes are model-facing and are guarded by host approval.
+    # Retained writes are blocked before approval.
     assert ctx.hooks["pre_tool_call"](
         tool_name="microsoft365_outlook", args={"action": "send", "user_id": USER, "message_id": "AAMkAG"}
-    )["action"] == "approve"
+    )["action"] == "block"
     assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_outlook", args=None) == {
         "action": "block",
         "message": "Microsoft 365 arguments must be an object",

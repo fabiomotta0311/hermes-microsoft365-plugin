@@ -43,7 +43,7 @@ index d780c4c19dd..58e11de34cc 100644
 +        _execute_after_middleware,
          original_args=function_args, **hook_ids,
      )
- 
+
 diff --git a/hermes_cli/plugins.py b/hermes_cli/plugins.py
 index 15fa39d7154..cc17e80d8ad 100644
 --- a/hermes_cli/plugins.py
@@ -98,7 +98,7 @@ index 0459d26500c..48f77963988 100644
 @@ -1618,6 +1618,25 @@ class TestPreToolCallDirective:
          )
          assert get_pre_tool_call_directive("write_file", {}) == ("approve", None)
- 
+
 +    def test_approval_is_rechecked_after_argument_modification(self, monkeypatch):
 +        """A write modified after approval must be evaluated against final arguments."""
 +        seen = []
@@ -118,9 +118,8 @@ index 0459d26500c..48f77963988 100644
 +        assert modified == {"path": "unsafe.txt"}
 +        assert seen == [{"path": "safe.txt"}, {"path": "unsafe.txt"}]
 +
- 
+
  class TestResolvePreToolBlock:
      """Tests for the single dispatch-site chokepoint that resolves a
--- 
+--
 2.55.0.windows.5
-

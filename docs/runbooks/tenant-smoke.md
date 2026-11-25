@@ -1,5 +1,10 @@
 # Smoke test em tenant autorizado
 
+> **Bloqueio atual:** todas as escritas estão retidas no dispatch. As etapas de upload,
+> envio e outras mutações abaixo são um roteiro futuro, não podem ser executadas nesta
+> versão e não autorizam contornar o dispatch chamando handlers diretamente. Uma futura
+> promoção exige os gates CORE-1/CORE-2, revisão e autorização explícita para o tenant.
+
 Este runbook leva o plugin de "verificado offline" a "verificado no real". Ele é o único
 documento que autoriza alguém a afirmar que uma permissão foi concedida ou que uma operação
 funciona contra o Microsoft Graph — testes offline, `plugins validate` e `plugins doctor` não

@@ -831,23 +831,18 @@ MESSAGING_OPERATIONS: tuple[str, ...] = (
     "calendar.update_events",
 )
 
-#: Operations this milestone exposes to the model. This literal includes selected writes;
-#: their presence does not establish that the host approval boundary is safe. Operational use
-#: of writes requires a supported host with both CORE-1/CORE-2 protections verified.
+#: Read operations exposed to the model. Writes remain implemented but withheld until
+#: both CORE-1/CORE-2 protections are verified in the actual supported host.
 EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "outlook.search",
     "outlook.read",
-    "outlook.create_draft",
-    "outlook.send",
     "calendar.search",
     "sharepoint.search",
     "sharepoint.read",
     "sharepoint.download_files",
-    "sharepoint.upload_files",
     "onedrive.search",
     "onedrive.read",
     "onedrive.download_files",
-    "onedrive.upload_files",
     "teams.list_teams",
     "teams.list_channels",
     "teams.list_chats",

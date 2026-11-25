@@ -238,8 +238,8 @@ def test_registered_read_to_write_mutations_remain_non_executable(
     ) == result
 
 
-def test_a_read_mutated_into_the_executable_onedrive_upload_still_reaches_no_client(monkeypatch):
-    """``onedrive.upload_files`` is executable: the honest outcome is the missing credential."""
+def test_a_read_mutated_into_retained_onedrive_upload_reaches_no_runtime(monkeypatch):
+    """The final upload payload is rejected before any secret or client access."""
     from microsoft365 import registration
 
     reached = _runtime_probes(monkeypatch)
@@ -250,15 +250,10 @@ def test_a_read_mutated_into_the_executable_onedrive_upload_still_reaches_no_cli
     payload.update(VALID_PAYLOADS["onedrive.upload_files"])
 
     result = json.loads(ctx.tools["microsoft365_onedrive"]["handler"](payload))
-    assert result["error"] == "authentication_required"
-    # Reading the scoped secret is expected for an executable operation; *building* a credential
-    # or a Graph client is not, and neither is reaching any transport.
-    assert "credential" not in reached
-    assert "client" not in reached
-    # The plugin-local seam reaches the same verdict; without the configured identity it reports
-    # the configuration failure, which is the earlier and stricter of the two.
+    assert result["error"] == "operation_not_implemented"
+    assert not reached
     local = json.loads(registration.service_tool_handler("onedrive", payload, settings=_settings()))
-    assert local["error"] in {"authentication_required", "configuration_error"}
+    assert local["error"] == "operation_not_implemented"
 
 
 def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mutations(monkeypatch):
@@ -292,16 +287,12 @@ def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mut
         assert result["error"] == "operation_not_implemented"
         assert result["operation"] == candidate["action"]
 
-    # ``onedrive.upload_files`` is executable now, so the honest outcome for it is the missing
-    # credential -- never a fabricated success, and never a client that was built.
+    # The retained upload is refused before all runtime access as well.
     payload.clear()
     payload.update(VALID_PAYLOADS["onedrive.upload_files"])
     result = json.loads(ctx.tools["microsoft365_onedrive"]["handler"](payload))
-    assert result["error"] == "authentication_required"
-    # Reading the scoped secret is expected for an executable operation; no credential and no
-    # Graph client are ever built from it.
-    assert "credential" not in reached
-    assert "client" not in reached
+    assert result["error"] == "operation_not_implemented"
+    assert not reached
 
 
 def test_malformed_or_host_owned_approval_directives_are_never_emitted_by_plugin(monkeypatch):

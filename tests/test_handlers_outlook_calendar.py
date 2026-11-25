@@ -1418,9 +1418,9 @@ def test_create_events_refuses_when_a_field_did_not_reach_the_request(monkeypatc
 #: literally, so a reverted flag -- or one flag too many -- fails here.
 EXECUTABLE_OPERATIONS = frozenset(
     {
-        OUTLOOK_SEARCH, OUTLOOK_READ, OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, CALENDAR_SEARCH,
-        "sharepoint.search", "sharepoint.read", "sharepoint.download_files", "sharepoint.upload_files",
-        "onedrive.search", "onedrive.read", "onedrive.download_files", "onedrive.upload_files",
+        OUTLOOK_SEARCH, OUTLOOK_READ, CALENDAR_SEARCH,
+        "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
+        "onedrive.search", "onedrive.read", "onedrive.download_files",
         "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
@@ -1431,6 +1431,7 @@ EXECUTABLE_OPERATIONS = frozenset(
 #: non-executable until the generic host approval fix (CORE-1/CORE-2) is available (R5).
 NON_EXECUTABLE_WRITES = frozenset(
     {
+        OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, "sharepoint.upload_files", "onedrive.upload_files",
         CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS,
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
@@ -1592,7 +1593,7 @@ def test_known_limitations_records_the_milestone_state():
 
     for key in sorted(IMPLEMENTED_OPERATIONS):
         assert key.split(".", 1)[1] in text or key in text, key
-    assert "Exactly eighteen reads are executable" in text
+    assert "All writes are retained" in text
     assert "`active_actions()` never returns them" in text
     assert "final arguments" in text
     # the pre-WP6 wording claimed nothing consumed the paginator

@@ -80,15 +80,15 @@ WP7_HANDLERS = frozenset(
     }
 )
 
-#: Every SharePoint/OneDrive operation exposed to the model: the six reads plus both uploads.
+#: Only the six reads are exposed; uploads remain implemented but withheld.
 WP7_EXECUTABLE = frozenset(
     {
-        SHAREPOINT_SEARCH, SHAREPOINT_READ, SHAREPOINT_DOWNLOAD, SHAREPOINT_UPLOAD,
-        ONEDRIVE_SEARCH, ONEDRIVE_READ, ONEDRIVE_DOWNLOAD, ONEDRIVE_UPLOAD,
+        SHAREPOINT_SEARCH, SHAREPOINT_READ, SHAREPOINT_DOWNLOAD,
+        ONEDRIVE_SEARCH, ONEDRIVE_READ, ONEDRIVE_DOWNLOAD,
     }
 )
 
-#: Both uploads are writes and both are executable through the approval boundary.
+#: Both uploads are retained writes.
 WP7_WRITES = frozenset({SHAREPOINT_UPLOAD, ONEDRIVE_UPLOAD})
 
 DRIVE = "drive"
@@ -901,9 +901,9 @@ def test_the_registry_declares_exactly_the_six_file_reads_executable():
     from microsoft365.contract import EXECUTABLE_OPERATIONS
 
     assert set(EXECUTABLE_OPERATIONS) == {
-        "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send", "calendar.search",
+        "outlook.search", "outlook.read", "calendar.search",
         "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
-    } | set(WP7_EXECUTABLE) | {"sharepoint.upload_files", "todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}
+    } | set(WP7_EXECUTABLE) | {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}
 
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable

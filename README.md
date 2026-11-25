@@ -46,11 +46,11 @@ The administrative registry retains all operations:
 - SharePoint: `search`, `read`, `download_files`, `upload_files`
 - OneDrive: `search`, `read`, `download_files`, `upload_files`
 - Calendar: `search`, `create_events`, `update_events`
-- Teams Graph: `list_teams`, `list_channels`, `search_messages`, `send_messages`
+- Teams Graph: `list_teams`, `list_channels`, `search_messages`, `send_messages`, `list_chats`, `read_chat_messages`, `send_chat_message`
 - Microsoft To Do: `list_task_lists`, `search`, `read`, `create_tasks`, `update_tasks`
 - Planner: `list_plans`, `list_buckets`, `list_tasks`, `read`, `create_tasks`, `update_tasks`
 
-The registry records authentication support, implementation state, permissions, and write approval requirements per operation. Unsupported or not-yet-verified combinations are reported rather than deleted or silently promoted into active schemas.
+The registry records authentication support, implementation state, permissions, and write approval requirements per operation. All writes remain withheld from schemas and dispatch, even when their handlers are implemented. Unsupported or not-yet-verified combinations are reported rather than deleted or silently promoted into active schemas.
 
 `calendar.create_events` supports the optional `transaction_id` argument. It is sent as Graph's
 `transactionId`, so a caller can make retries of the same create operation deduplicable. This is
