@@ -37,6 +37,8 @@ cannot be verified offline.
 """
 from __future__ import annotations
 
+import math
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -344,7 +346,10 @@ def verify_activity_token(
 
     current = time.time() if now is None else now
     expires = claims.get("exp")
-    if isinstance(expires, (int, float)) and current > float(expires) + leeway_seconds:
+    if (isinstance(expires, bool) or not isinstance(expires, (int, float))
+            or (isinstance(expires, float) and not math.isfinite(expires))):
+        raise InboundTeamsError("authentication_required", status=INVALID_TOKEN)
+    if current >= expires + leeway_seconds:
         raise InboundTeamsError("authentication_required", status=TOKEN_EXPIRED)
     not_before = claims.get("nbf")
     if isinstance(not_before, (int, float)) and current + leeway_seconds < float(not_before):
@@ -420,6 +425,7 @@ class ConversationRegistry:
         self._bindings: dict[tuple[str, str, str], str] = {}
         self._sessions: dict[str, set[tuple[str, str, str]]] = {}
         self._delivered: dict[str, None] = {}
+        self._delivery_lock = threading.Lock()
 
     # ---------------------------------------------------------------- bindings
 
@@ -527,6 +533,7 @@ def admit_activity(
     issuers: Sequence[str] = BOT_FRAMEWORK_ISSUERS,
     leeway_seconds: int = DEFAULT_LEEWAY_SECONDS,
     now: float | None = None,
+    on_activity: Callable[[InboundDecision], None] | None = None,
 ) -> InboundDecision:
     """The single entry point: authenticate, validate, correlate, deduplicate.
 
@@ -540,6 +547,13 @@ def admit_activity(
     A duplicate is returned as a decision with ``duplicate=True`` rather than raised: the correct
     HTTP answer for a retried Activity is a success, and the caller needs to know it was a
     retry so it does not hand the same text to the session twice.
+
+    Pass the synchronous handoff as ``on_activity``: it runs under a process-local
+    registry-wide lock, and only a normal return commits the dedupe marker. Without a
+    callback, returning the decision itself counts as delivery. Callbacks must not
+    re-enter this registry. A callback that performs side effects and then raises may
+    be called again, so hosts must make handoffs idempotent. This is not durable or
+    cross-process exactly-once delivery.
     """
     token = authorization_bearer(authorization)
     if token is None:
@@ -562,8 +576,16 @@ def admit_activity(
         # twice on a retry: "cannot tell" must not become "deliver anyway".
         raise InboundTeamsError("validation_error", status=INVALID_ACTIVITY)
 
-    if registry.already_delivered(activity.activity_id):
-        return InboundDecision(session_id, identity, activity, duplicate=True)
-
-    registry.mark_delivered(activity.activity_id)
-    return InboundDecision(session_id, identity, activity, duplicate=False)
+    # Serialize check, handoff and commit. A failed handoff leaves the id retryable;
+    # callbacks must not re-enter admission on the same registry.
+    with registry._delivery_lock:
+        if registry.already_delivered(activity.activity_id):
+            return InboundDecision(session_id, identity, activity, duplicate=True)
+        decision = InboundDecision(session_id, identity, activity, duplicate=False)
+        if on_activity is not None:
+            try:
+                on_activity(decision)
+            except Exception as exc:
+                raise RuntimeError("activity handoff failed") from exc
+        registry.mark_delivered(activity.activity_id)
+        return decision

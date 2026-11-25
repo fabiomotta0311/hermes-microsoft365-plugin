@@ -149,7 +149,10 @@ def build_application(
 
     ``on_activity`` receives every admitted, non-duplicate decision -- this is the hand-off point
     where the host puts the text in front of a session. It is called *before* ``reply`` so a
-    session that is going to answer has already seen the turn.
+    session that is going to answer has already seen the turn. If the callback raises,
+    the request returns 500 and the activity remains retryable. It may have already
+    performed side effects, so the host must make the handoff idempotent. The registry
+    is process-local and serializes callbacks; callbacks must not re-enter it.
 
     ``reply`` receives the decision and returns anything; a refusal it raises is reported as an
     undelivered answer with a sanitized status, still under a 200. Its response is never inspected
@@ -239,6 +242,7 @@ def _handle(environ: dict, **options: Any) -> tuple[int, str, bytes]:
             issuers=options["issuers"],
             leeway_seconds=options["leeway_seconds"],
             now=options["clock"](),
+            on_activity=options["on_activity"],
         )
     except InboundTeamsError as refused:
         raise WebhookError(_http_status_for(refused)) from None
@@ -246,11 +250,6 @@ def _handle(environ: dict, **options: Any) -> tuple[int, str, bytes]:
     if decision.duplicate:
         # Acknowledged so the Bot Framework stops retrying, and nothing is delivered twice.
         return 200, "duplicate", _json_body({"status": "duplicate"})
-
-    if options["on_activity"] is not None:
-        # A failure here is a genuine unknown: the host may or may not have consumed the turn.
-        # 500 lets the redelivery happen; the duplicate guard keeps it from double-delivering.
-        options["on_activity"](decision)
 
     if options["reply"] is None:
         return 200, "accepted", _json_body({"status": "accepted"})
