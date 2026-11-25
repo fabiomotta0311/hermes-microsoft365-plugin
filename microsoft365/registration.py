@@ -76,6 +76,34 @@ def invoke_handler(handler, args):
     return result
 
 
+def tool_result(payload: Any) -> str | dict:
+    """Coerce a handler's result into the only shapes the host accepts.
+
+    The host accepts a string or the multimodal envelope
+    (``tools/registry.py::_normalize_handler_result``); anything else becomes a
+    ``tool_result_contract`` error. A handler that returns a plain ``dict`` therefore
+    fails *at the host boundary* -- after the work already succeeded, and with the error
+    naming the result type rather than the operation, which is what made this so hard to
+    read in a live trace: every error path of this plugin worked, and only the first
+    *successful* call failed.
+
+    The coercion lives here, at the single point every service tool returns through, so
+    no individual handler can reintroduce the mismatch and a handler added later is
+    covered by construction. The multimodal envelope is passed through untouched: the
+    host reads it structurally, and re-encoding it as JSON would destroy it.
+    """
+    if isinstance(payload, str):
+        return payload
+    if (
+        isinstance(payload, dict)
+        and payload.get("_multimodal") is True
+        and isinstance(payload.get("content"), list)
+    ):
+        return payload
+    # Never invoke application-defined __str__ or __repr__ for opaque values.
+    return json.dumps(payload, default=lambda _: "[unsupported value]")
+
+
 def unavailable_handler(args, *, service: str) -> str:
     """Fallback for every operation that has no handler yet."""
     del args
@@ -158,7 +186,7 @@ def service_tool_handler(
     if not operation_is_executable(settings, service, operation):
         return json.dumps(not_executable_payload(service, operation))
     try:
-        return invoke_handler(handler, args)
+        return tool_result(invoke_handler(handler, args))
     except ExecutionError as exc:
         return json.dumps({"error": exc.category, "message": str(exc)})
     except GraphError as exc:
@@ -235,7 +263,7 @@ def register_plugin(ctx) -> None:
 
     def preflight_handler(args, **kwargs):
         del args, kwargs
-        return json.dumps(build_preflight(settings, configuration_errors=errors), default=str)
+        return json.dumps(build_preflight(settings, configuration_errors=errors), default=lambda _: "[unsupported value]")
 
     ctx.register_tool(
         name="microsoft365_preflight",

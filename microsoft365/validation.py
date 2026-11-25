@@ -56,6 +56,8 @@ from typing import Any, Mapping
 
 from .contract import OPERATIONS, OPERATION_REGISTRY, TODO_TASK_WRITE_FIELDS, Settings
 from .errors import CATEGORIES, GraphError
+from .files import SESSION_TRANSFER_LIMIT_BYTES
+from .upload_session import CHUNK_SIZE_MULTIPLE, CONFLICT_BEHAVIORS, MAX_CHUNK_SIZE
 
 #: Ceiling for an opaque Graph identifier (``user_id``, ``message_id``, ``drive_id`` ...).
 MAX_IDENTIFIER_LENGTH = 256
@@ -75,12 +77,18 @@ MAX_TIME_ZONE_LENGTH = 64
 MAX_ETAG_LENGTH = 200
 #: Ceiling for a media type.
 MAX_MEDIA_TYPE_LENGTH = 128
-#: Ceiling for the decoded size of an encoded upload payload (10 MiB; the upload-session path
-#: above it is not implemented by this plugin and is declared as such).
-MAX_UPLOAD_DECODED_BYTES = 10 * 1024 * 1024
+#: Ceiling for the decoded size of an encoded upload payload. The simple ``PUT /content``
+#: contract tops out at 10 MiB; anything larger is carried by a resumable upload session, so
+#: the validator must accept a payload the simple transfer alone could never hold.
+MAX_UPLOAD_DECODED_BYTES = SESSION_TRANSFER_LIMIT_BYTES
 #: Ceiling for the *encoded* representation, computed from the decoded ceiling so the encoded
 #: gate is the exact size of a maximum payload (a test pins the arithmetic).
 MAX_UPLOAD_ENCODED_CHARS = 4 * ((MAX_UPLOAD_DECODED_BYTES + 2) // 3)
+
+#: Above this decoded size the validator stops decoding and only checks the exact shape
+#: (alphabet, padding, length). The transfer layer decodes with ``validate=True`` under its
+#: own bound before any byte is sent, so this stays a memory decision, not a safety hole.
+BASE64_EXACT_DECODE_BYTES = 1 * 1024 * 1024
 
 #: Every argument kind this validator knows.
 KINDS = frozenset(
@@ -159,6 +167,7 @@ USER_SCOPED_OPERATIONS = frozenset(
         "calendar.create_events",
         "calendar.update_events",
         "teams.list_teams",
+        "teams.list_chats",
         "todo.list_task_lists",
         "todo.search",
         "todo.read",
@@ -417,6 +426,8 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 _RECIPIENTS,
                 _spec("cc_recipients", "recipients"),
                 _spec("bcc_recipients", "recipients"),
+                # A write is confirmed by re-reading it unless the caller opts out explicitly.
+                _spec("verify", "boolean"),
             ),
         ),
         "outlook.send": OperationArguments(
@@ -458,6 +469,10 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 _spec("body", "text", max_length=MAX_TEXT_LENGTH),
                 _spec("location", "text"),
                 _spec("is_all_day", "boolean"),
+                # Graph uses this client-supplied key to deduplicate event creation retries.
+                _spec("transaction_id", "identifier"),
+                # A write is confirmed by re-reading it unless the caller opts out explicitly.
+                _spec("verify", "boolean"),
             ),
         ),
         "calendar.update_events": OperationArguments(
@@ -497,6 +512,22 @@ def _build_contracts() -> dict[str, OperationArguments]:
             properties=(
                 _spec("team_id", "identifier", required=True),
                 _spec("channel_id", "identifier", required=True),
+                _spec("body", "text", max_length=MAX_TEXT_LENGTH, required=True),
+                _spec("content_type", "enum", values=("text", "html")),
+            ),
+        ),
+        "teams.list_chats": OperationArguments(
+            key="teams.list_chats",
+            properties=(_spec("user_id", "identifier", required=True), _integer("top", 1, 100)),
+        ),
+        "teams.read_chat_messages": OperationArguments(
+            key="teams.read_chat_messages",
+            properties=(_spec("chat_id", "identifier", required=True), _integer("top", 1, 100)),
+        ),
+        "teams.send_chat_message": OperationArguments(
+            key="teams.send_chat_message",
+            properties=(
+                _spec("chat_id", "identifier", required=True),
                 _spec("body", "text", max_length=MAX_TEXT_LENGTH, required=True),
                 _spec("content_type", "enum", values=("text", "html")),
             ),
@@ -590,7 +621,13 @@ def _build_contracts() -> dict[str, OperationArguments]:
         download = f"{service}.download_files"
         contracts[download] = OperationArguments(
             key=download,
-            properties=(_spec("drive_id", "identifier", required=True), *_file_item_arguments()),
+            properties=(
+                _spec("drive_id", "identifier", required=True),
+                *_file_item_arguments(),
+                # Optional ranged-read window for files above the simple-transfer bound. A
+                # multiple of 320 KiB, exactly like the upload fragment size.
+                _integer("range_size", CHUNK_SIZE_MULTIPLE, MAX_CHUNK_SIZE),
+            ),
             exclusions=(_exclusive(*_ITEM_FORMS),),
         )
         upload = f"{service}.upload_files"
@@ -601,9 +638,19 @@ def _build_contracts() -> dict[str, OperationArguments]:
                 *_file_item_arguments(),
                 _spec("content_base64", "base64", required=True),
                 _spec("content_type", "media_type", max_length=MAX_MEDIA_TYPE_LENGTH),
+                _spec("conflict_behavior", "enum", values=CONFLICT_BEHAVIORS),
+                # The pre-``conflict_behavior`` boolean, kept working: ``true`` means ``replace``
+                # and ``false`` means ``fail``. Deprecated, and refused alongside the definitive
+                # name rather than silently outranking it.
                 _spec("overwrite", "boolean"),
+                _integer("chunk_size", CHUNK_SIZE_MULTIPLE, MAX_CHUNK_SIZE),
+                # A write is confirmed by re-reading it unless the caller opts out explicitly.
+                _spec("verify", "boolean"),
             ),
-            exclusions=(_exclusive(*_ITEM_FORMS),),
+            exclusions=(
+                _exclusive(*_ITEM_FORMS),
+                _at_most_one(("overwrite",), ("conflict_behavior",)),
+            ),
         )
         read = f"{service}.read"
         contracts[read] = OperationArguments(
@@ -813,8 +860,14 @@ def _validate_base64(context: _Context, name: str, value: Any, spec: ArgumentSpe
     if decoded_size > MAX_UPLOAD_DECODED_BYTES:
         _reject(
             f"{name} decodes to more than the {MAX_UPLOAD_DECODED_BYTES} bytes this call "
-            "accepts (a larger transfer needs an upload session, which is not implemented)"
+            "accepts"
         )
+    if decoded_size > BASE64_EXACT_DECODE_BYTES:
+        # A payload this large is already resident in memory in its encoded form; decoding it here
+        # would double the allocation for no extra safety. The alphabet, padding and length
+        # checks above are exact, and the transfer layer decodes with ``validate=True`` under
+        # its own bound before any byte is sent, so nothing malformed reaches Graph.
+        return
     try:
         decoded = base64.b64decode(value, validate=True)
     except (binascii.Error, ValueError):
@@ -1018,9 +1071,14 @@ def _check_bound_user(settings: Settings, key: str, arguments: Mapping[str, Any]
     """Enforce the configured profile's single-user resource boundary."""
     configured = settings.user_id.strip()
     definition = OPERATION_REGISTRY[key]
-    if not configured or "user_id" not in definition.required_identifiers:
+    if "user_id" not in definition.required_identifiers:
         return None
     supplied = arguments.get("user_id")
+    if not configured:
+        return Rejection(
+            "configuration_error",
+            f"microsoft365.{key}: a configured user_id is required for this user-scoped operation",
+        )
     if not isinstance(supplied, str) or not supplied.strip() or supplied.strip() != configured:
         return Rejection(
             "validation_error",
@@ -1086,9 +1144,6 @@ def check(settings: Settings | None, *, service: Any, arguments: Any) -> Rejecti
             f"microsoft365.{key} is disabled by the plugin configuration; enable "
             f"capabilities.{service}.{operation} to use it",
         )
-    boundary_rejection = _check_bound_user(settings, key, arguments)
-    if boundary_rejection is not None:
-        return boundary_rejection
     contract = ARGUMENT_CONTRACTS.get(key)
     if contract is None:
         # Unreachable while the contract table covers the registry (a test pins that); if it
@@ -1104,6 +1159,9 @@ def check(settings: Settings | None, *, service: Any, arguments: Any) -> Rejecti
         _validate_arguments(context, contract)
     except _Failure as failure:
         return Rejection("validation_error", f"microsoft365.{key}: {failure.detail}")
+    boundary_rejection = _check_bound_user(settings, key, arguments)
+    if boundary_rejection is not None:
+        return boundary_rejection
     return None
 
 

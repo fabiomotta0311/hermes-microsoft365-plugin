@@ -523,7 +523,8 @@ def test_teams_search_messages_requires_a_query_and_a_bounded_page(graph_client)
         )
 
 
-def test_upload_session_builds_the_request_but_is_declared_not_implemented(graph_client):
+def test_upload_session_row_is_verified_and_no_longer_withheld(graph_client):
+    """The session request is pinned here; ``microsoft365.upload_session`` executes it."""
     from microsoft365.sdk_contract import UNIMPLEMENTED_CASES, build_write_request_information
 
     request = build_write_request_information(
@@ -533,7 +534,7 @@ def test_upload_session_builds_the_request_but_is_declared_not_implemented(graph
     assert request.http_method.value == "POST"
     assert urlsplit(request.url).path == "/drives/drive/items/item/createUploadSession"
     assert serialized_body(request) == {}
-    assert "upload_session" in UNIMPLEMENTED_CASES
+    assert "upload_session" not in UNIMPLEMENTED_CASES
 
 
 def test_write_contract_rejects_an_unknown_case(graph_client):

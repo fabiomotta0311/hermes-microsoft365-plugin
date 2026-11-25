@@ -54,6 +54,7 @@ def build_collection_request_information(
     drive_id: str = "",
     drive_item_id: str = "",
     team_id: str = "",
+    chat_id: str = "",
     plan_id: str = "",
     owner_id: str = "",
     group_id: str | None = None,
@@ -96,6 +97,12 @@ def build_collection_request_information(
     if case == "teams_channels":
         builder = client.teams.by_team_id(_required(team_id, "team_id")).channels
         return _request(builder, select=["id", "displayName"])
+    if case == "teams_chats":
+        builder = client.users.by_user_id(_required(user_id, "user_id")).chats
+        return _request(builder, top=bounded)
+    if case == "teams_chat_messages":
+        builder = client.chats.by_chat_id(_required(chat_id, "chat_id")).messages
+        return _request(builder, top=bounded)
     if case == "planner_plans":
         if group_id is None:
             builder = client.planner.plans
@@ -395,9 +402,12 @@ WRITE_CASES: tuple[str, ...] = (
     "upload_session",
 )
 
-# Rows whose request shape is fully verified here but which the product deliberately does
-# not execute yet: >10 MiB transfers stay reported as not implemented (see WP4/D3).
-UNIMPLEMENTED_CASES: frozenset[str] = frozenset({"upload_session"})
+# Rows whose request shape is fully verified here but which the product deliberately does not
+# execute yet. Empty: the resumable upload session that owns ``upload_session`` now executes, so
+# no verified row is withheld. It builds the request through this case *and* through
+# ``microsoft365/upload_session.py``, which adds the real ``DriveItem`` body and the fragment
+# transfers that target the session's own pre-authorized URL.
+UNIMPLEMENTED_CASES: frozenset[str] = frozenset()
 
 
 def build_write_request_information(
@@ -414,6 +424,7 @@ def build_write_request_information(
     planner_task_id: str = "",
     team_id: str = "",
     channel_id: str = "",
+    chat_id: str = "",
     drive_id: str = "",
     drive_item_id: str = "",
     subject: str = "",
@@ -422,6 +433,7 @@ def build_write_request_information(
     recipients=None,
     start=None,
     end=None,
+    transaction_id: str = "",
     title: str = "",
     due_date_time=None,
     status=None,
@@ -475,7 +487,12 @@ def build_write_request_information(
                 raise ValueError(f"{name} must be a DateTimeTimeZone")
         builder = client.users.by_user_id(_required(user_id, "user_id")).calendar.events
         return builder.to_post_request_information(
-            Event(subject=_required(subject, "subject"), start=start, end=end),
+            Event(
+                subject=_required(subject, "subject"),
+                start=start,
+                end=end,
+                transaction_id=transaction_id or None,
+            ),
             RequestConfiguration(headers=_headers()),
         )
     if case == "calendar_update_events":
@@ -542,6 +559,13 @@ def build_write_request_information(
             .channels.by_channel_id(_required(channel_id, "channel_id"))
             .messages
         )
+        return builder.to_post_request_information(
+            ChatMessage(body=_item_body(content, content_type)),
+            RequestConfiguration(headers=_headers()),
+        )
+    if case == "teams_chat_send":
+        from msgraph.generated.models.chat_message import ChatMessage
+        builder = client.chats.by_chat_id(_required(chat_id, "chat_id")).messages
         return builder.to_post_request_information(
             ChatMessage(body=_item_body(content, content_type)),
             RequestConfiguration(headers=_headers()),

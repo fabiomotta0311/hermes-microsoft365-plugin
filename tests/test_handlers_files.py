@@ -47,9 +47,11 @@ from msgraph.generated.models.drive_item import DriveItem
 from msgraph.generated.models.file import File
 from msgraph.generated.models.site import Site
 from msgraph.generated.models.site_collection_response import SiteCollectionResponse
+from msgraph.generated.models.upload_session import UploadSession
 
 from microsoft365 import handlers as handler_package
 from microsoft365.contract import OPERATIONS, OPERATION_REGISTRY, WRITE_OPERATIONS, Settings
+from microsoft365.upload_session import ChunkOutcome
 from microsoft365.errors import CATEGORIES, GraphError
 from microsoft365.handlers import HandlerContext, load_handlers
 from microsoft365.sdk_contract import (
@@ -78,8 +80,7 @@ WP7_HANDLERS = frozenset(
     }
 )
 
-#: The six reads this milestone exposes to the model. The uploads stay implemented and
-#: non-executable until the generic host approval fix (CORE-1/CORE-2) is available.
+#: Only the six reads are exposed; uploads remain implemented but withheld.
 WP7_EXECUTABLE = frozenset(
     {
         SHAREPOINT_SEARCH, SHAREPOINT_READ, SHAREPOINT_DOWNLOAD,
@@ -87,7 +88,7 @@ WP7_EXECUTABLE = frozenset(
     }
 )
 
-#: The two uploads: implemented, contract-pinned, exercised offline and withheld.
+#: Both uploads are retained writes.
 WP7_WRITES = frozenset({SHAREPOINT_UPLOAD, ONEDRIVE_UPLOAD})
 
 DRIVE = "drive"
@@ -95,6 +96,7 @@ SITE = "site"
 ITEM = "item"
 ITEM_ADDRESS = "root:/a/b.txt:"
 ITEM_ENCODED_PATH = "/drives/drive/items/root%3A%2Fa%2Fb.txt%3A"
+SESSION_URL = "https://upload.contoso.invalid/session"
 MIME = "application/pdf"
 
 
@@ -230,7 +232,7 @@ def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
     implemented = {
         "outlook.search", "outlook.read", "outlook.create_draft", "outlook.send",
         "calendar.search", "calendar.create_events", "calendar.update_events",
-        "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages",
+        "teams.list_teams", "teams.list_channels", "teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message",
     } | set(WP7_HANDLERS)
     assert set(HANDLER_TABLE) == implemented | {"todo.list_task_lists", "todo.search", "todo.read", "todo.create_tasks", "todo.update_tasks", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read", "planner.create_tasks", "planner.update_tasks"}
     for key in sorted(WP7_HANDLERS):
@@ -446,7 +448,11 @@ def test_read_refuses_a_traversal_path_before_any_client_work():
 # ======================================================================================
 
 
-def test_download_returns_exact_bytes_from_the_content_endpoint():
+def test_download_without_an_etag_fails_closed_before_any_http_request():
+    """Handler-level metadata here carries no ``eTag``/``downloadUrl`` (the double only models
+    the SDK item-read contract, not Graph's real undeclared OData properties), so the
+    small-file transport refuses it before ever building an HTTP client -- never silently
+    treating a file with no verifiable identity as downloadable."""
     payload = bytes(range(256)) * 4
     adapter = HandlerGraphAdapter(
         {
@@ -455,17 +461,15 @@ def test_download_returns_exact_bytes_from_the_content_endpoint():
         }
     )
 
-    result = run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
+    with pytest.raises(GraphError) as caught:
+        run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
 
+    assert caught.value.status == "metadata_without_identity"
     paths = [urlsplit(request.url).path for request in adapter.requests]
-    assert paths == [ITEM_ENCODED_PATH, f"{ITEM_ENCODED_PATH}/content"]
-    assert result["operation"] == SHAREPOINT_DOWNLOAD
-    assert result["result"]["content_type"] == MIME
-    assert result["result"]["name"] == "b.txt"
-    assert result["result"]["size"] == len(payload)
+    assert paths == [ITEM_ENCODED_PATH]
 
 
-def test_download_by_id_targets_the_same_content_endpoint():
+def test_download_by_id_without_an_etag_fails_closed_after_the_metadata_read():
     payload = b"abc"
     adapter = HandlerGraphAdapter(
         {
@@ -474,26 +478,33 @@ def test_download_by_id_targets_the_same_content_endpoint():
         }
     )
 
-    run(ONEDRIVE_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_id": ITEM}, adapter)
+    with pytest.raises(GraphError) as caught:
+        run(ONEDRIVE_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_id": ITEM}, adapter)
 
-    assert urlsplit(adapter.requests[1].url).path == f"/drives/{DRIVE}/items/{ITEM}/content"
+    assert caught.value.status == "metadata_without_identity"
+    assert len(adapter.requests) == 1
+    assert urlsplit(adapter.requests[0].url).path == f"/drives/{DRIVE}/items/{ITEM}"
 
 
-def test_download_content_type_comes_from_authenticated_metadata_not_the_caller():
-    payload = b"<h1>"
+def test_download_above_the_small_file_budget_fails_closed_before_any_content_request():
+    """Above ``download_range.SMALL_DOWNLOAD_BUDGET_BYTES`` there is still no bounded host
+    artifact sink to stream into, so this remains refused regardless of identity/content type."""
+    from microsoft365.download_range import SMALL_DOWNLOAD_BUDGET_BYTES
+
+    oversized = SMALL_DOWNLOAD_BUDGET_BYTES + 1
     adapter = HandlerGraphAdapter(
         {
-            ("GET", ITEM_ENCODED_PATH): drive_item(size=4, mime_type="application/pdf", name="report.html"),
-            ("GET", f"{ITEM_ENCODED_PATH}/content"): payload,
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=oversized, mime_type="application/pdf", name="report.html"),
         }
     )
 
-    result = run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
+    with pytest.raises(GraphError) as caught:
+        run(SHAREPOINT_DOWNLOAD, {"action": "download_files", "drive_id": DRIVE, "item_path": "a/b.txt"}, adapter)
 
-    # The content type is the one authenticated metadata declared, not anything the caller
-    # supplied (the download_files argument contract has no content_type at all).
-    assert result["result"]["content_type"] == "application/pdf"
-    assert result["result"]["name"] == "report.html"
+    assert caught.value.status == "download_range_not_implemented"
+    paths = [urlsplit(request.url).path for request in adapter.requests]
+    assert paths == [ITEM_ENCODED_PATH]
+
 
 
 def test_upload_puts_exact_bytes_with_content_type_to_the_content_url():
@@ -547,41 +558,70 @@ def test_upload_defaults_the_content_type_to_octet_stream():
     assert result["result"]["content_type"] == "application/octet-stream"
 
 
-def test_upload_refuses_overwrite_false_which_a_simple_put_cannot_honor():
-    import base64
+def test_the_deprecated_overwrite_alias_still_selects_the_same_behavior():
+    """The handbook promises ``overwrite`` keeps working; these two must be equivalent."""
+    import base64 as b64
 
-    adapter = HandlerGraphAdapter()
-    calls: list = []
+    payload = b"legacy alias"
+    # ``overwrite=True`` means replace, which the simple PUT path can express.
+    adapter = HandlerGraphAdapter(
+        {
+            ("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload)),
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload), name="b.txt"),
+        }
+    )
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {
+            "action": "upload_files",
+            "drive_id": DRIVE,
+            "item_path": "a/b.txt",
+            "content_base64": b64.b64encode(payload).decode(),
+            "overwrite": True,
+        },
+        adapter,
+    )
+    assert result["result"]["conflict_behavior"] == "replace"
 
-    def factory():
-        calls.append("client")
-        return graph_client(adapter)
+    # ``overwrite=False`` means fail, which only the resumable session can express -- so the
+    # alias proving out is that the request became a createUploadSession, not a bare PUT.
+    from microsoft365.handlers import files as files_handlers
+    from microsoft365.upload_session import ChunkOutcome, DEFAULT_CHUNK_SIZE
 
-    context = HandlerContext(settings=settings(), client_factory=factory)
-    arguments = {
-        "action": "upload_files",
-        "drive_id": DRIVE,
-        "item_path": "a/b.txt",
-        "content_base64": base64.b64encode(b"payload").decode("ascii"),
-        "overwrite": False,
-    }
+    session_adapter = HandlerGraphAdapter(
+        {
+            ("POST", f"{ITEM_ENCODED_PATH}/createUploadSession"): UploadSession(
+                upload_url=SESSION_URL, expiration_date_time=None, next_expected_ranges=["0-"]
+            ),
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload), name="b.txt"),
+        }
+    )
+    original = files_handlers.put_chunk_default
+    files_handlers.put_chunk_default = lambda upload_url, start, end, total, chunk, content_type: ChunkOutcome(
+        status=201, item=DriveItem(id=ITEM, name="b.txt", size=total)
+    )
+    try:
+        session_result = run(
+            SHAREPOINT_UPLOAD,
+            {
+                "action": "upload_files",
+                "drive_id": DRIVE,
+                "item_path": "a/b.txt",
+                "content_base64": b64.b64encode(payload).decode(),
+                "overwrite": False,
+            },
+            session_adapter,
+        )
+    finally:
+        files_handlers.put_chunk_default = original
 
-    with pytest.raises(GraphError) as caught:
-        invocation(SHAREPOINT_UPLOAD)(arguments, context)
-
-    assert caught.value.category == "validation_error"
-    assert calls == []
-    assert adapter.requests == []
+    assert session_result["result"]["conflict_behavior"] == "fail"
+    assert session_result["result"]["transfer"] == "session"
+    assert [request.http_method.value for request in session_adapter.requests] == ["POST", "GET"]
 
 
-def test_upload_rejects_an_oversized_encoded_payload_before_decoding():
-    import base64
-
-    from microsoft365.files import SIMPLE_TRANSFER_LIMIT_BYTES
-
-    oversized = base64.b64encode(b"x" * (SIMPLE_TRANSFER_LIMIT_BYTES + 4096)).decode("ascii")
-    adapter = HandlerGraphAdapter()
-
+def test_stating_both_conflict_forms_is_refused_rather_than_one_silently_winning():
+    adapter = HandlerGraphAdapter({})
     with pytest.raises(GraphError) as caught:
         run(
             SHAREPOINT_UPLOAD,
@@ -589,14 +629,275 @@ def test_upload_rejects_an_oversized_encoded_payload_before_decoding():
                 "action": "upload_files",
                 "drive_id": DRIVE,
                 "item_path": "a/b.txt",
-                "content_base64": oversized,
+                "content_base64": "aGk=",
+                "overwrite": True,
+                "conflict_behavior": "rename",
+            },
+            adapter,
+        )
+    assert getattr(caught.value, "category", None) == "validation_error"
+    assert adapter.requests == []
+
+
+def test_an_upload_is_confirmed_against_the_item_read_back_after_the_write():
+    """The provenance of a successful upload is the server's own state, not the 2xx alone."""
+    import base64
+
+    payload = b"hello wp7"
+    adapter = HandlerGraphAdapter(
+        {
+            ("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload)),
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload), name="b.txt"),
+        }
+    )
+
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {"action": "upload_files", "drive_id": DRIVE, "item_path": "a/b.txt", "content_base64": base64.b64encode(payload).decode()},
+        adapter,
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["reconciliation"]["status"] == "confirmed"
+    assert result["reconciliation"]["expected"]["size"] == len(payload)
+    assert result["reconciliation"]["observed"]["size"] == len(payload)
+
+
+def test_an_upload_whose_item_came_back_with_the_wrong_size_is_reported_as_mismatched():
+    """Success plus a contradicting re-read is an incident, never a clean success."""
+    import base64
+
+    payload = b"x" * 1024
+    adapter = HandlerGraphAdapter(
+        {
+            ("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload)),
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload) - 1, name="b.txt"),
+        }
+    )
+
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {"action": "upload_files", "drive_id": DRIVE, "item_path": "a/b.txt", "content_base64": base64.b64encode(payload).decode()},
+        adapter,
+    )
+
+    assert result["status"] == "succeeded"
+    reconciliation = result["reconciliation"]
+    assert reconciliation["status"] == "mismatched"
+    assert reconciliation["reason"] == "size_differs_from_what_was_written"
+
+
+def test_an_upload_that_cannot_be_read_back_is_unverified_not_confirmed():
+    """A re-read failure must not be laundered into a confirmation."""
+    import base64
+
+    payload = b"hello"
+    adapter = HandlerGraphAdapter(
+        {("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload))}
+    )
+
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {"action": "upload_files", "drive_id": DRIVE, "item_path": "a/b.txt", "content_base64": base64.b64encode(payload).decode()},
+        adapter,
+    )
+
+    assert result["reconciliation"]["status"] == "unverified"
+    assert result["reconciliation"]["reason"] == "the_item_could_not_be_read_back"
+    assert result["reconciliation"]["status"] != "confirmed"
+
+
+def test_a_caller_may_explicitly_skip_the_confirmation_read():
+    import base64
+
+    payload = b"hello"
+    adapter = HandlerGraphAdapter(
+        {("PUT", f"{ITEM_ENCODED_PATH}/content"): DriveItem(id=ITEM, name="b.txt", size=len(payload))}
+    )
+
+    result = run(
+        SHAREPOINT_UPLOAD,
+        {
+            "action": "upload_files",
+            "drive_id": DRIVE,
+            "item_path": "a/b.txt",
+            "content_base64": base64.b64encode(payload).decode(),
+            "verify": False,
+        },
+        adapter,
+    )
+
+    assert result["reconciliation"] == {"status": "skipped"}
+    # Only the write was issued; no read-back was attempted.
+    assert [request.http_method.value for request in adapter.requests] == ["PUT"]
+
+
+def test_a_rename_conflict_policy_is_checked_against_the_name_that_was_asked_for():
+    """The reconciliation compares the name the caller requested, so a rename is visible."""
+    import base64 as b64
+
+    payload = b"x" * 4096
+    session = UploadSession(upload_url=SESSION_URL, expiration_date_time=None, next_expected_ranges=["0-"])
+    adapter = HandlerGraphAdapter(
+        {
+            ("POST", f"{ITEM_ENCODED_PATH}/createUploadSession"): session,
+            ("GET", ITEM_ENCODED_PATH): drive_item(size=len(payload), name="b (2).txt"),
+        }
+    )
+
+    def put(upload_url, start, end, total, chunk, content_type):
+        return ChunkOutcome(status=201, item=DriveItem(id=ITEM, name="b.txt", size=total))
+
+    from microsoft365.handlers import files as files_handlers
+
+    original = files_handlers.put_chunk_default
+    files_handlers.put_chunk_default = put
+    try:
+        result = run(
+            SHAREPOINT_UPLOAD,
+            {
+                "action": "upload_files",
+                "drive_id": DRIVE,
+                "item_path": "a/b.txt",
+                "content_base64": b64.b64encode(payload).decode(),
+                "conflict_behavior": "rename",
+            },
+            adapter,
+        )
+    finally:
+        files_handlers.put_chunk_default = original
+
+    reconciliation = result["reconciliation"]
+    assert reconciliation["status"] == "mismatched"
+    assert reconciliation["reason"] == "name_differs_from_what_was_written"
+    assert reconciliation["expected"]["name"] == "b.txt"
+
+
+def test_upload_above_the_simple_bound_is_routed_through_an_upload_session():
+    """A file the simple ``PUT /content`` cannot hold is *not* refused: it is sent in chunks."""
+    import base64
+
+    from microsoft365.files import SIMPLE_TRANSFER_LIMIT_BYTES
+    from microsoft365.handlers import files as files_handlers
+    from microsoft365.upload_session import DEFAULT_CHUNK_SIZE
+
+    payload = b"x" * (SIMPLE_TRANSFER_LIMIT_BYTES + 4096)
+    session = UploadSession(upload_url=SESSION_URL, expiration_date_time=None, next_expected_ranges=["0-"])
+    adapter = HandlerGraphAdapter(
+        {("POST", f"{ITEM_ENCODED_PATH}/createUploadSession"): session}
+    )
+    fragments: list[tuple[int, int]] = []
+
+    def put(upload_url, start, end, total, chunk, content_type):
+        fragments.append((start, end))
+        if end + 1 < total:
+            return ChunkOutcome(status=202, next_expected_ranges=[f"{end + 1}-"])
+        return ChunkOutcome(status=201, item=None)
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(files_handlers, "put_chunk_default", put)
+    monkey.setattr(files_handlers, "sleep_default", lambda _seconds: None)
+    try:
+        result = run(
+            SHAREPOINT_UPLOAD,
+            {
+                "action": "upload_files",
+                "drive_id": DRIVE,
+                "item_path": "a/b.txt",
+                "content_base64": base64.b64encode(payload).decode("ascii"),
                 "content_type": "text/plain",
             },
             adapter,
         )
+    finally:
+        monkey.undo()
 
-    assert caught.value.category == "operation_not_implemented"
-    assert adapter.requests == []
+    assert result["result"]["transfer"] == "session"
+    assert result["result"]["size_bytes"] == len(payload)
+    assert adapter.requests[0].url.endswith(f"{ITEM_ENCODED_PATH}/createUploadSession")
+    assert fragments[0] == (0, DEFAULT_CHUNK_SIZE - 1)
+    assert len(fragments) == (len(payload) + DEFAULT_CHUNK_SIZE - 1) // DEFAULT_CHUNK_SIZE
+
+
+def test_upload_conflict_behavior_fail_is_honored_through_the_session():
+    import base64
+
+    from microsoft365.handlers import files as files_handlers
+
+    payload = b"conflict"
+    session = UploadSession(upload_url=SESSION_URL, expiration_date_time=None, next_expected_ranges=["0-"])
+    adapter = HandlerGraphAdapter(
+        {("POST", f"{ITEM_ENCODED_PATH}/createUploadSession"): session}
+    )
+    sent: dict = {}
+
+    def put(upload_url, start, end, total, chunk, content_type):
+        sent["chunk"] = chunk
+        return ChunkOutcome(status=201, item=None)
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(files_handlers, "put_chunk_default", put)
+    monkey.setattr(files_handlers, "sleep_default", lambda _seconds: None)
+    try:
+        result = run(
+            SHAREPOINT_UPLOAD,
+            {
+                "action": "upload_files",
+                "drive_id": DRIVE,
+                "item_path": "a/b.txt",
+                "content_base64": base64.b64encode(payload).decode("ascii"),
+                "content_type": "text/plain",
+                "conflict_behavior": "fail",
+            },
+            adapter,
+        )
+    finally:
+        monkey.undo()
+
+    assert result["result"]["conflict_behavior"] == "fail"
+    assert result["result"]["transfer"] == "session"
+    assert sent["chunk"] == payload
+    body = adapter.requests[0].content.decode("utf-8")
+    assert "@odata.conflictBehavior" in body
+    assert "fail" in body
+
+
+def test_upload_rejects_an_oversized_encoded_payload_before_decoding(monkeypatch):
+    """The encoded gate runs before any decode, so an oversized payload is never materialized."""
+    from microsoft365 import validation
+
+    # Narrow the bound and rebuild the contracts so the test stays small: the declared ceiling is
+    # the resumable-session bound and is pinned separately so this narrowing cannot hide drift.
+    monkeypatch.setattr(validation, "MAX_UPLOAD_ENCODED_CHARS", 64)
+    monkeypatch.setattr(validation, "MAX_UPLOAD_DECODED_BYTES", 48)
+    monkeypatch.setattr(
+        validation,
+        "_TEXT_KIND_DEFAULTS",
+        {**validation._TEXT_KIND_DEFAULTS, "base64": {"max_length": 64}},
+    )
+    monkeypatch.setattr(validation, "ARGUMENT_CONTRACTS", validation._build_contracts())
+    oversized = "A" * 68
+
+    rejection = validation.check(
+        settings(),
+        service="sharepoint",
+        arguments={
+            "action": "upload_files",
+            "drive_id": DRIVE,
+            "item_path": "a/b.txt",
+            "content_base64": oversized,
+            "content_type": "text/plain",
+        },
+    )
+
+    assert rejection is not None
+    assert rejection.category == "validation_error"
+    assert "encoded" in rejection.message
+    # The product bound is the resumable-session ceiling, far above the simple transfer.
+    from microsoft365.files import SESSION_TRANSFER_LIMIT_BYTES, SIMPLE_TRANSFER_LIMIT_BYTES
+
+    assert SESSION_TRANSFER_LIMIT_BYTES > SIMPLE_TRANSFER_LIMIT_BYTES
+
 
 
 # ======================================================================================
@@ -610,7 +911,7 @@ def test_the_registry_declares_exactly_the_six_file_reads_executable():
 
     assert set(EXECUTABLE_OPERATIONS) == {
         "outlook.search", "outlook.read", "calendar.search",
-        "teams.list_teams", "teams.list_channels",
+        "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
     } | set(WP7_EXECUTABLE) | {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}
 
     assert {
@@ -639,14 +940,14 @@ def test_operation_status_exposes_the_reads_and_withholds_every_upload():
         application = operation_status("application", service, operation)
         assert application.auth_status == "supported", key
         assert application.executable is (key in WP7_EXECUTABLE), key
-        assert operation_status("delegated", service, operation).executable is False, key
+        assert operation_status("delegated", service, operation).executable is (key in WP7_EXECUTABLE), key
 
 
 def test_uploads_stay_out_of_the_model_facing_schema():
     from microsoft365.registration import active_actions, schema_for
 
     configuration = settings()
-    for key in sorted(WP7_WRITES):
+    for key in sorted(WP7_WRITES - WP7_EXECUTABLE):
         service, operation = key.split(".", 1)
         actions = active_actions(configuration, service)
         assert operation not in actions, key
@@ -667,7 +968,7 @@ def test_the_reads_are_model_facing_and_the_withheld_uploads_keep_their_handler(
         schema = schema_for(service, actions)
         assert operation in schema["parameters"]["properties"]["action"]["enum"], key
 
-    for key in sorted(WP7_WRITES):
+    for key in sorted(WP7_WRITES - WP7_EXECUTABLE):
         service, operation = key.split(".", 1)
         actions = active_actions(configuration, service)
         assert operation not in actions, key

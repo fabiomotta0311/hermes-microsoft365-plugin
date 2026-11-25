@@ -4,4 +4,4 @@ The current product decision is **single-user binding** when `settings.user_id` 
 
 This plugin does not infer tenant-wide access from application permissions. Planner operations are the explicit exception to the *user identifier requirement* because their endpoint metadata does not require `user_id`; that does not grant tenant-wide authorization, consent, or execution.
 
-Preflight derives `tenant_id`, `client_id`, and `user_id` requirements from selected operation metadata. Application mode checks the scoped application secret; delegated mode does not read it. Delegated authentication remains not implemented, and all write operations remain non-executable.
+Preflight derives `tenant_id`, `client_id`, and `user_id` requirements from selected operation metadata. Application mode checks the scoped application secret; delegated mode uses Azure Identity device-code OAuth and never reads the application secret. The delegated token cache is OS-protected and unencrypted fallback is refused. Write operations remain subject to the normal approval boundary.

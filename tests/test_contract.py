@@ -7,7 +7,7 @@ EXPECTED_OPERATIONS = {
     "sharepoint": ("search", "read", "download_files", "upload_files"),
     "onedrive": ("search", "read", "download_files", "upload_files"),
     "calendar": ("search", "create_events", "update_events"),
-    "teams": ("list_teams", "list_channels", "search_messages", "send_messages"),
+    "teams": ("list_teams", "list_channels", "search_messages", "send_messages", "list_chats", "read_chat_messages", "send_chat_message"),
     "todo": ("list_task_lists", "search", "read", "create_tasks", "update_tasks"),
     "planner": ("list_plans", "list_buckets", "list_tasks", "read", "create_tasks", "update_tasks"),
 }
@@ -20,7 +20,7 @@ EXECUTABLE_READS = frozenset(
         "outlook.search", "outlook.read", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
-        "teams.list_teams", "teams.list_channels",
+        "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }
@@ -59,7 +59,7 @@ def test_application_auth_matrix_keeps_unsupported_and_unverified_explicit():
     assert operation_status("application", "teams", "send_messages").auth_status == "unsupported_auth_mode"
     assert operation_status("application", "todo", "create_tasks").auth_status == "not_verified"
     assert operation_status("application", "outlook", "search").auth_status == "supported"
-    assert operation_status("delegated", "outlook", "search").auth_status == "not_implemented"
+    assert operation_status("delegated", "outlook", "search").auth_status == "supported"
 
 
 def test_capabilities_accept_only_real_booleans_and_known_names():
@@ -152,7 +152,7 @@ def test_application_support_status_is_recorded_per_operation():
         for key, definition in OPERATION_REGISTRY.items()
         if definition.app.status == "unsupported_auth_mode"
     }
-    assert unsupported == {"teams.search_messages", "teams.send_messages"}
+    assert unsupported == {"teams.search_messages", "teams.send_messages", "teams.send_chat_message"}
     not_verified = {
         key for key, definition in OPERATION_REGISTRY.items() if definition.app.status == "not_verified"
     }
@@ -162,4 +162,4 @@ def test_application_support_status_is_recorded_per_operation():
         if definition.app.status not in {"unsupported_auth_mode", "not_verified"}:
             assert definition.app.status == "supported", key
             assert definition.app.permissions, key
-        assert definition.delegated.status == "not_implemented", key
+        assert definition.delegated.status == "supported", key

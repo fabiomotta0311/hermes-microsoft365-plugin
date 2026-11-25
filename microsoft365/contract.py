@@ -9,14 +9,14 @@ OPERATIONS = {
     "sharepoint": ("search", "read", "download_files", "upload_files"),
     "onedrive": ("search", "read", "download_files", "upload_files"),
     "calendar": ("search", "create_events", "update_events"),
-    "teams": ("list_teams", "list_channels", "search_messages", "send_messages"),
+    "teams": ("list_teams", "list_channels", "search_messages", "send_messages", "list_chats", "read_chat_messages", "send_chat_message"),
     "todo": ("list_task_lists", "search", "read", "create_tasks", "update_tasks"),
     "planner": ("list_plans", "list_buckets", "list_tasks", "read", "create_tasks", "update_tasks"),
 }
 WRITE_OPERATIONS = frozenset(
     {
         "create_draft", "send", "upload_files", "create_events", "update_events",
-        "send_messages", "create_tasks", "update_tasks",
+        "send_messages", "send_chat_message", "create_tasks", "update_tasks",
     }
 )
 
@@ -647,8 +647,9 @@ def todo_write_support(key: str) -> ApplicationWriteSupport:
 _PERMISSION_MAP = {
     "teams.list_teams": ("Team.ReadBasic.All",), "teams.list_channels": ("Channel.ReadBasic.All",),
     "teams.search_messages": (), "teams.send_messages": (),
+    "teams.list_chats": ("Chat.ReadBasic.All",), "teams.read_chat_messages": ("Chat.Read.All",), "teams.send_chat_message": (),
 }
-_UNSUPPORTED_APPLICATION = frozenset({"teams.search_messages", "teams.send_messages"})
+_UNSUPPORTED_APPLICATION = frozenset({"teams.search_messages", "teams.send_messages", "teams.send_chat_message"})
 
 
 # --------------------------------------------------------------------------------------
@@ -830,10 +831,8 @@ MESSAGING_OPERATIONS: tuple[str, ...] = (
     "calendar.update_events",
 )
 
-#: The operations this milestone exposes to the model: the three verified reads whose handler,
-#: contract case and endpoint row all exist. It is deliberately a literal, not a derivation:
-#: exposing an operation is a decision, and every write stays non-executable until the generic
-#: host approval fix (CORE-1/CORE-2) is available in a supported Hermes release (R5, D1).
+#: Read operations exposed to the model. Writes remain implemented but withheld until
+#: both CORE-1/CORE-2 protections are verified in the actual supported host.
 EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "outlook.search",
     "outlook.read",
@@ -846,6 +845,8 @@ EXECUTABLE_OPERATIONS: tuple[str, ...] = (
     "onedrive.download_files",
     "teams.list_teams",
     "teams.list_channels",
+    "teams.list_chats",
+    "teams.read_chat_messages",
     "todo.list_task_lists",
     "todo.search",
     "todo.read",
@@ -1101,15 +1102,29 @@ TEAMS_ENDPOINTS: tuple[MessagingEndpoint, ...] = (
         contract_call="build_write_request_information",
     ),
     MessagingEndpoint(
-        service="teams",
-        operation="send_messages",
-        method="POST",
-        path_template="/teams/{team_id}/channels/{channel_id}/messages",
-        container="channel",
-        path_identifiers=("team_id", "channel_id"),
-        contract_case="teams_send_messages",
+        service="teams", operation="send_messages", method="POST",
+        path_template="/teams/{team_id}/channels/{channel_id}/messages", container="channel",
+        path_identifiers=("team_id", "channel_id"), contract_case="teams_send_messages",
         documentation_page="https://learn.microsoft.com/en-us/graph/api/channel-post-messages",
         contract_call="build_write_request_information",
+    ),
+    MessagingEndpoint(
+        service="teams", operation="list_chats", method="GET",
+        path_template="/users/{user_id}/chats", container="user",
+        path_identifiers=("user_id",), application_permissions=("Chat.ReadBasic.All",), contract_call="build_collection_request_information",
+        contract_case="teams_chats", documentation_page="https://learn.microsoft.com/en-us/graph/api/chat-list",
+    ),
+    MessagingEndpoint(
+        service="teams", operation="read_chat_messages", method="GET",
+        path_template="/chats/{chat_id}/messages", container="chat",
+        path_identifiers=("chat_id",), application_permissions=("Chat.Read.All",), contract_call="build_collection_request_information",
+        contract_case="teams_chat_messages", documentation_page="https://learn.microsoft.com/en-us/graph/api/chat-list-messages",
+    ),
+    MessagingEndpoint(
+        service="teams", operation="send_chat_message", method="POST",
+        path_template="/chats/{chat_id}/messages", container="chat",
+        path_identifiers=("chat_id",), contract_call="build_write_request_information",
+        contract_case="teams_chat_send", documentation_page="https://learn.microsoft.com/en-us/graph/api/chat-post-messages",
     ),
 )
 TEAMS_OPERATIONS: tuple[str, ...] = tuple(f"teams.{row.operation}" for row in TEAMS_ENDPOINTS)
@@ -1139,11 +1154,9 @@ def teams_endpoints(key: str) -> tuple[MessagingEndpoint, ...]:
 #: The authentication modes this plugin records support for.
 AUTH_MODES = frozenset({"application", "delegated"})
 
-#: The modes this plugin actually implements. Delegated is fully described in the matrix
-#: (status, scopes, admin consent) but no delegated authentication flow exists yet (WP14), so
-#: every delegated record resolves to ``not_implemented``: authentication is not implemented
-#: for that mode, which is a different statement from an operation being unavailable in it.
-IMPLEMENTED_AUTH_MODES = frozenset({"application"})
+#: The authentication modes this plugin implements. Delegated OAuth uses Azure Identity's
+#: device-code flow and OS-protected persistent token cache; credentials remain outside the plugin.
+IMPLEMENTED_AUTH_MODES = frozenset({"application", "delegated"})
 
 #: What a mode-level support status is allowed to mean.
 MODE_SUPPORT_STATUSES = frozenset(
@@ -1168,10 +1181,10 @@ APPLICATION_CONSENT_BASIS = (
     "so nothing an application-mode call needs can be consented to by a user"
 )
 
-#: Why a delegated scope is reported as requiring consent while delegated is not implemented.
+#: Why a delegated scope is reported as requiring consent before the tenant confirms it.
 UNVERIFIED_DELEGATED_CONSENT_BASIS = (
-    "the delegated consent record was not re-read offline and delegated authentication is "
-    "not implemented (R10; WP14), so consent is reported as required until it is recorded"
+    "the delegated scope is recorded but tenant consent has not been verified (R10), "
+    "so consent is reported as required until it is recorded"
 )
 
 #: Why an operation with no claimed permission has nothing to consent to.
@@ -1203,6 +1216,9 @@ _DELEGATED_SCOPES: dict[str, tuple[str, ...]] = {
     "teams.list_channels": ("Channel.ReadBasic.All",),
     "teams.search_messages": ("Chat.Read", "ChannelMessage.Read.All"),
     "teams.send_messages": ("ChannelMessage.Send",),
+    "teams.list_chats": ("Chat.Read",),
+    "teams.read_chat_messages": ("Chat.Read",),
+    "teams.send_chat_message": ("ChatMessage.Send",),
     "todo.list_task_lists": ("Tasks.Read",),
     "todo.search": ("Tasks.Read",),
     "todo.read": ("Tasks.Read",),
@@ -1215,6 +1231,17 @@ _DELEGATED_SCOPES: dict[str, tuple[str, ...]] = {
     "planner.create_tasks": ("Tasks.ReadWrite",),
     "planner.update_tasks": ("Tasks.ReadWrite",),
 }
+
+
+def delegated_scopes(settings: "Settings") -> tuple[str, ...]:
+    """Return the least-privileged delegated scopes for enabled operations."""
+    selected = (
+        f"{service}.{operation}"
+        for service, operations in settings.capabilities.items()
+        for operation, enabled in operations.items()
+        if enabled
+    )
+    return tuple(dict.fromkeys(scope for key in selected for scope in _DELEGATED_SCOPES[key]))
 
 
 @dataclass(frozen=True)
@@ -1354,12 +1381,7 @@ def _application_mode_support(key: str) -> ModeSupport:
 
 
 def _delegated_mode_support(key: str) -> ModeSupport:
-    """Delegated support of one operation: scopes recorded, mode not implemented yet.
-
-    The status is ``not_implemented`` while ``delegated`` is absent from
-    :data:`IMPLEMENTED_AUTH_MODES`, so recording scopes cannot advertise a mode the plugin
-    cannot perform. Only WP14 may add the mode, and it does so in one place.
-    """
+    """Return delegated OAuth support and its least-privileged scopes."""
     scopes = _DELEGATED_SCOPES[key]
     implemented = "delegated" in IMPLEMENTED_AUTH_MODES
     unavailable = key in _UNSUPPORTED_APPLICATION
@@ -1371,12 +1393,12 @@ def _delegated_mode_support(key: str) -> ModeSupport:
         admin_consent=True,
         admin_consent_basis=UNVERIFIED_DELEGATED_CONSENT_BASIS,
         reason=(
-            "delegated authentication is not implemented (WP14); this operation is only "
-            "available in delegated mode, the scopes below are the ones it will need"
+            "delegated OAuth is available through device-code authentication; this operation is "
+            "only available in delegated mode, and the scopes below are the ones it needs"
             if unavailable
             else (
-                "delegated authentication is not implemented (WP14); the scopes below are the "
-                "ones this operation will need"
+                "delegated OAuth is available through device-code authentication; the scopes below "
+                "are the ones this operation needs"
             )
         ),
     )
@@ -1515,7 +1537,7 @@ def _teams_definition(key: str) -> OperationDefinition:
 
     Search and send are retained in the administrative registry with their delegated scopes,
     but application mode has no permission claim for either endpoint and therefore refuses them
-    before client construction. Delegated authentication remains not implemented until WP14.
+    before client construction. Delegated authentication is implemented through Azure Identity device-code OAuth with an OS-protected token cache.
     """
     return _endpoint_backed_definition(
         service="teams",
@@ -1593,12 +1615,9 @@ class ConfigurationError(ValueError):
 def operation_status(auth_mode: str, service: str, operation: str) -> OperationStatus:
     """The honest status of one operation in one authentication mode, read from the matrix.
 
-    The verdict is the operation's own mode support record (WP13): ``unsupported_auth_mode``
-    when the mode cannot reach the endpoint at all, ``not_implemented`` when the authentication
-    mode itself is not implemented (delegated, WP14), ``not_verified`` when the mode's
-    permission for the endpoint is unverified, ``supported`` when the mode is available. A
-    supported mode still never implies execution: ``executable`` stays whatever the registry
-    declares, so support and executability cannot be conflated.
+    The verdict is the operation's own mode support record: ``unsupported_auth_mode`` when
+    the mode cannot reach the endpoint, ``not_verified`` when its permission is unverified,
+    and ``supported`` when the mode is available.
     """
     key = f"{service}.{operation}"
     definition = OPERATION_REGISTRY.get(key)

@@ -56,7 +56,7 @@ def test_capabilities_contains_every_registry_operation(client):
     assert response.status_code == 200
     rows = response.json()["operations"]
     assert {row["key"] for row in rows} == set(OPERATION_REGISTRY)
-    assert len(rows) == sum(map(len, OPERATIONS.values())) == 30
+    assert len(rows) == sum(map(len, OPERATIONS.values())) == 33
 
 
 def test_preflight_is_local_and_sanitized(monkeypatch):

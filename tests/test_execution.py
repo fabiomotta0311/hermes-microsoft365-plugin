@@ -211,16 +211,21 @@ def test_run_async_rejects_a_non_awaitable():
     assert caught.value.category == "configuration_error"
 
 
-def test_run_async_fails_closed_inside_a_running_loop():
-    from microsoft365.execution import ExecutionError, run_async
+def test_run_async_completes_inside_a_running_loop():
+    """A call made from inside a running loop completes instead of failing closed.
+
+    The host invokes plugin handlers on a thread that owns a running loop under the
+    default ``plugins.isolation: in_process``, so this is the ordinary deployment,
+    not misuse. The seam used to refuse it, which made every live call fail before
+    any Microsoft traffic (issue #16); the seam's own coverage for that path lives in
+    ``tests/test_execution_seam.py``.
+    """
+    from microsoft365.execution import run_async
 
     async def nested():
-        run_async(asyncio.sleep(0))
+        return run_async(asyncio.sleep(0, result="done"))
 
-    with pytest.raises(ExecutionError) as caught:
-        asyncio.run(nested())
-
-    assert caught.value.category == "internal_error"
+    assert asyncio.run(nested()) == "done"
 
 
 def test_resolve_request_adapter_returns_the_adapter_of_the_injected_client(graph_client):

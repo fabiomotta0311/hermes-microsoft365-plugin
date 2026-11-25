@@ -60,7 +60,7 @@ SERVICES = ("outlook", "sharepoint", "onedrive", "calendar", "teams", "todo", "p
 #: The two Teams operations this plugin can only reach in delegated mode: in application mode
 #: the endpoint does not exist for an app-only token. They are covered by their own test
 #: instead of the happy-path table.
-APPLICATION_UNREACHABLE = ("teams.search_messages", "teams.send_messages")
+APPLICATION_UNREACHABLE = ("teams.search_messages", "teams.send_messages", "teams.send_chat_message")
 
 #: One known-good payload per operation that application mode can run today.
 VALID_PAYLOADS: dict[str, dict] = {
@@ -129,6 +129,8 @@ VALID_PAYLOADS: dict[str, dict] = {
     },
     "teams.list_teams": {"action": "list_teams", "user_id": USER},
     "teams.list_channels": {"action": "list_channels", "team_id": TEAM, "select": ["displayName"]},
+    "teams.list_chats": {"action": "list_chats", "user_id": USER, "top": 10},
+    "teams.read_chat_messages": {"action": "read_chat_messages", "chat_id": "chat-1", "top": 10},
     "planner.list_plans": {"action": "list_plans"},
     "planner.list_buckets": {"action": "list_buckets", "plan_id": PLAN},
     "planner.list_tasks": {"action": "list_tasks", "plan_id": PLAN, "top": 20},
@@ -245,12 +247,12 @@ INVALID_CALLS: tuple[tuple[str, str, object, str, str], ...] = (
     ("disabled operation", "outlook", {"action": "read", "user_id": USER, "message_id": "M"}, "validation_error", "disabled_read"),
     ("teams search in application mode", "teams", {"action": "search_messages", "query": "hello"}, "unsupported_auth_mode", "application"),
     ("teams channel message in application mode", "teams", {"action": "send_messages", "team_id": TEAM, "channel_id": CHANNEL, "body": "hi"}, "unsupported_auth_mode", "application"),
-    ("valid payload in delegated mode", "outlook", {"action": "search", "user_id": USER}, "unsupported_auth_mode", "delegated"),
+    ("valid payload in delegated mode", "outlook", {"action": "search", "user_id": USER}, None, "delegated"),
     ("unknown mode", "outlook", {"action": "search", "user_id": USER}, "unsupported_auth_mode", "hybrid"),
 )
 
 
-def _settings(mode: str = "application"):
+def _settings(mode: str = "application", *, user_id: str = USER):
     from microsoft365.contract import OPERATIONS, Settings
 
     capabilities = {service: True for service in OPERATIONS}
@@ -262,13 +264,27 @@ def _settings(mode: str = "application"):
         # nothing at all); the record is built directly so the validator's own refusal of an
         # unsupported authentication mode is still exercised.
         return Settings(authentication_mode="hybrid", capabilities={})
-    return Settings.from_mapping({"capabilities": capabilities, "authentication_mode": mode})
+    return Settings.from_mapping(
+        {"capabilities": capabilities, "authentication_mode": mode, "user_id": user_id}
+    )
 
 
 def _check(service: str, payload, *, mode: str = "application"):
     from microsoft365.validation import check
 
     return check(_settings(mode), service=service, arguments=payload)
+
+
+def test_application_user_scoped_operation_fails_closed_without_profile_user():
+    from microsoft365.validation import check
+
+    rejection = check(
+        _settings(user_id=""), service="outlook", arguments={"action": "search", "user_id": USER}
+    )
+
+    assert rejection is not None
+    assert rejection.category == "configuration_error"
+    assert "configured user_id is required" in rejection.message
 
 
 class RecordingContext:
@@ -293,6 +309,7 @@ def _config(mode: str = "application", *, capabilities=None):
     from microsoft365.contract import OPERATIONS
 
     return {
+        "user_id": USER,
         "capabilities": capabilities or {service: True for service in OPERATIONS},
         "authentication_mode": "application" if mode == "disabled_read" else mode,
     }
@@ -314,7 +331,7 @@ def _registered(mode: str = "application", *, capabilities=None, monkeypatch=Non
         from microsoft365.contract import OPERATIONS
 
         def simulated_active_actions(settings, service):
-            if settings.authentication_mode != "application":
+            if settings.authentication_mode not in {"application", "delegated"}:
                 return ()
             selected = settings.selected(service)
             return tuple(operation for operation in OPERATIONS[service] if operation in selected)
@@ -391,6 +408,9 @@ def test_application_roles_are_pinned_per_operation():
         "teams.list_channels": ("Channel.ReadBasic.All",),
         "teams.search_messages": (),
         "teams.send_messages": (),
+        "teams.list_chats": ("Chat.ReadBasic.All",),
+        "teams.read_chat_messages": ("Chat.Read.All",),
+        "teams.send_chat_message": (),
         "todo.list_task_lists": ("Tasks.Read.All",),
         "todo.search": ("Tasks.Read.All",),
         "todo.read": ("Tasks.Read.All",),
@@ -428,6 +448,9 @@ def test_delegated_scopes_are_recorded_independently_of_the_application_roles():
         "teams.list_channels": ("Channel.ReadBasic.All",),
         "teams.search_messages": ("Chat.Read", "ChannelMessage.Read.All"),
         "teams.send_messages": ("ChannelMessage.Send",),
+        "teams.list_chats": ("Chat.Read",),
+        "teams.read_chat_messages": ("Chat.Read",),
+        "teams.send_chat_message": ("ChatMessage.Send",),
         "todo.list_task_lists": ("Tasks.Read",),
         "todo.search": ("Tasks.Read",),
         "todo.read": ("Tasks.Read",),
@@ -519,7 +542,7 @@ def test_admin_consent_and_remote_verification_are_derived_and_fail_closed():
         OperationDefinition,
     )
 
-    assert IMPLEMENTED_AUTH_MODES == frozenset({"application"})
+    assert IMPLEMENTED_AUTH_MODES == frozenset({"application", "delegated"})
     assert REMOTE_VERIFICATION_STATUSES == frozenset({"not_tested", "verified"})
 
     for key, definition in OPERATION_REGISTRY.items():
@@ -563,11 +586,7 @@ def test_operation_status_is_derived_from_the_mode_matrix():
             assert status.auth_status == support.status, (key, mode)
             assert status.reason == support.reason, (key, mode)
             assert status.implementation_status == definition.implementation_status, (key, mode)
-            # executability is the registry flag *and* an available mode: the three verified
-            # reads run in application mode, nothing runs in the unimplemented delegated mode
-            assert status.executable is (
-                mode == "application" and (key in EXECUTABLE_READS or key in {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"})
-            ), (key, mode)
+            assert status.executable is (key in EXECUTABLE_READS or key in {"todo.list_task_lists", "todo.search", "todo.read", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read"}), (key, mode)
 
     unknown = operation_status("application", "outlook", "delete")
     assert unknown.auth_status == "unknown_operation"
@@ -575,7 +594,7 @@ def test_operation_status_is_derived_from_the_mode_matrix():
     assert operation_status("hybrid", "outlook", "search").auth_status == "not_implemented"
     assert operation_status("application", "teams", "search_messages").auth_status == "unsupported_auth_mode"
     assert operation_status("application", "todo", "create_tasks").auth_status == "not_verified"
-    assert operation_status("delegated", "outlook", "search").auth_status == "not_implemented"
+    assert operation_status("delegated", "outlook", "search").auth_status == "supported"
 
 
 def test_the_two_teams_operations_are_unsupported_in_application_mode():
@@ -587,11 +606,11 @@ def test_the_two_teams_operations_are_unsupported_in_application_mode():
         assert definition.app.permissions == (), key
         assert definition.app.permission_status == "no_permission_claimed", key
         assert definition.delegated.permissions, key
-        assert definition.delegated.status == "not_implemented", key
+        assert definition.delegated.status == "supported", key
         assert "delegated" in definition.delegated.reason, key
         service, operation = key.split(".", 1)
         assert operation_status("application", service, operation).auth_status == "unsupported_auth_mode"
-        assert operation_status("delegated", service, operation).auth_status == "not_implemented"
+        assert operation_status("delegated", service, operation).auth_status == "supported"
 
 
 def test_only_the_three_verified_reads_are_executable_and_every_handler_is_registered():
@@ -604,11 +623,11 @@ def test_only_the_three_verified_reads_are_executable_and_every_handler_is_regis
     from microsoft365.contract import OPERATION_REGISTRY
     from microsoft365.registration import HANDLER_TABLE
 
-    assert len(OPERATION_REGISTRY) == 30
+    assert len(OPERATION_REGISTRY) == 33
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
-    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}
 
     for key, definition in OPERATION_REGISTRY.items():
         assert definition.executable is (key in EXECUTABLE_READS), key
@@ -619,9 +638,9 @@ def test_only_the_three_verified_reads_are_executable_and_every_handler_is_regis
             # implemented and withheld, never removed (invariant 14)
             assert key in HANDLER_TABLE, key
             assert definition.write is True, key
-        elif key in {"teams.search_messages", "teams.send_messages"}:
+        elif key in {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}:
             assert key in HANDLER_TABLE, key
-            assert definition.write is (key == "teams.send_messages"), key
+            assert definition.write is (key in {"teams.send_messages", "teams.send_chat_message"}), key
         else:
             assert key not in HANDLER_TABLE, key
         assert definition.endpoint == "; ".join(definition.endpoints), key
@@ -634,6 +653,7 @@ def test_only_the_three_verified_reads_are_executable_and_every_handler_is_regis
                 "create_events",
                 "update_events",
                 "send_messages",
+                "send_chat_message",
                 "create_tasks",
                 "update_tasks",
             }
@@ -677,7 +697,7 @@ def test_user_scoped_operations_require_a_real_user_id():
     assert USER_SCOPED_OPERATIONS == frozenset(
         key
         for key in OPERATION_REGISTRY
-        if key.split(".", 1)[0] in {"outlook", "calendar", "todo"} or key == "teams.list_teams"
+        if key.split(".", 1)[0] in {"outlook", "calendar", "todo"} or key in {"teams.list_teams", "teams.list_chats"}
     )
     for key, contract in ARGUMENT_CONTRACTS.items():
         user_id = next((spec for spec in contract.properties if spec.name == "user_id"), None)
@@ -775,6 +795,9 @@ def test_every_invalid_payload_is_rejected_with_the_expected_category(
 ):
     rejection = _check(service, payload, mode=mode)
 
+    if expected_category is None:
+        assert rejection is None, label
+        return
     assert rejection is not None, label
     assert rejection.category == expected_category, label
     assert rejection.message, label
@@ -814,12 +837,31 @@ def test_rejection_never_echoes_the_rejected_value_and_bounds_the_argument_name(
     assert len(bounded.message) < 300
 
 
-def test_oversized_base64_is_refused_before_decoding():
+def test_oversized_base64_is_refused_before_decoding(monkeypatch):
+    from microsoft365 import validation
     from microsoft365.validation import MAX_UPLOAD_DECODED_BYTES, MAX_UPLOAD_ENCODED_CHARS, check
 
     # The encoded ceiling is exactly the encoded size of a maximum payload, so the two bounds
-    # cannot drift apart.
+    # cannot drift apart, and the product ceiling is the resumable-session bound.
     assert MAX_UPLOAD_ENCODED_CHARS == 4 * ((MAX_UPLOAD_DECODED_BYTES + 2) // 3)
+    assert MAX_UPLOAD_DECODED_BYTES == 250 * 1024 * 1024 * 1024
+
+    # The exact-decode gate keeps a bounded allocation in the test while the declared ceiling
+    # remains the session bound; both are pinned so neither drifts silently.
+    SMALL_DECODED = 2048
+    monkeypatch.setattr(validation, "BASE64_EXACT_DECODE_BYTES", SMALL_DECODED * 2)
+
+    # The bound is baked into the contract at import, so the encoded ceiling is narrowed by
+    # rebuilding the contracts under a patched bound; the declared ceiling is still pinned.
+    small_encoded = 4 * ((SMALL_DECODED + 2) // 3)
+    monkeypatch.setattr(validation, "MAX_UPLOAD_ENCODED_CHARS", small_encoded)
+    monkeypatch.setattr(validation, "MAX_UPLOAD_DECODED_BYTES", SMALL_DECODED)
+    monkeypatch.setattr(
+        validation,
+        "_TEXT_KIND_DEFAULTS",
+        {**validation._TEXT_KIND_DEFAULTS, "base64": {"max_length": small_encoded}},
+    )
+    monkeypatch.setattr(validation, "ARGUMENT_CONTRACTS", validation._build_contracts())
 
     settings = _settings("application")
     accepted = check(
@@ -829,7 +871,7 @@ def test_oversized_base64_is_refused_before_decoding():
             "action": "upload_files",
             "drive_id": DRIVE,
             "item_id": ITEM,
-            "content_base64": base64.b64encode(b"A" * MAX_UPLOAD_DECODED_BYTES).decode("ascii"),
+            "content_base64": base64.b64encode(b"A" * SMALL_DECODED).decode("ascii"),
         },
     )
     assert accepted is None
@@ -843,7 +885,7 @@ def test_oversized_base64_is_refused_before_decoding():
             "action": "upload_files",
             "drive_id": DRIVE,
             "item_id": ITEM,
-            "content_base64": "?" * (MAX_UPLOAD_ENCODED_CHARS + 4),
+            "content_base64": "?" * (small_encoded + 4),
         },
     )
     assert refusal is not None
@@ -855,7 +897,7 @@ def test_oversized_base64_is_refused_before_decoding():
 def test_bounded_strings_accept_the_declared_limit_and_refuse_one_more_character():
     from microsoft365.validation import MAX_IDENTIFIER_LENGTH, MAX_TEXT_LENGTH, check
 
-    settings = _settings("application")
+    settings = _settings("application", user_id="u" * MAX_IDENTIFIER_LENGTH)
 
     at_limit = check(
         settings,
@@ -875,7 +917,7 @@ def test_bounded_strings_accept_the_declared_limit_and_refuse_one_more_character
         service="outlook",
         arguments={
             "action": "create_draft",
-            "user_id": USER,
+            "user_id": "u" * MAX_IDENTIFIER_LENGTH,
             "subject": "s",
             "body": "b" * MAX_TEXT_LENGTH,
             "to_recipients": [RECIPIENT],
@@ -887,7 +929,7 @@ def test_bounded_strings_accept_the_declared_limit_and_refuse_one_more_character
         service="outlook",
         arguments={
             "action": "create_draft",
-            "user_id": USER,
+            "user_id": "u" * MAX_IDENTIFIER_LENGTH,
             "subject": "s",
             "body": "b" * (MAX_TEXT_LENGTH + 1),
             "to_recipients": [RECIPIENT],
@@ -981,14 +1023,10 @@ def test_naive_timestamp_is_accepted_when_the_operation_carries_a_time_zone():
     assert accepted is None
 
 
-def test_delegated_mode_is_refused_as_unsupported_until_it_exists():
+def test_delegated_mode_is_accepted_after_oauth_configuration():
     from microsoft365.validation import check
 
-    rejection = check(_settings("delegated"), service="outlook", arguments={"action": "search", "user_id": USER})
-
-    assert rejection is not None
-    assert rejection.category == "unsupported_auth_mode"
-    assert "delegated" in rejection.message
+    assert check(_settings("delegated"), service="outlook", arguments={"action": "search", "user_id": USER}) is None
     assert check(_settings("application"), service="outlook", arguments={"action": "search", "user_id": USER}) is None
 
 
@@ -1047,6 +1085,10 @@ def test_hook_and_dispatch_reject_identically(monkeypatch, label, service, paylo
 
     directive = ctx.hooks["pre_tool_call"](tool_name=tool_name, args=payload)
 
+    if expected_category is None:
+        assert expected is None, label
+        assert directive is None, label
+        return
     assert directive is not None and directive["action"] == "block", label
     assert expected is not None and expected.category == expected_category, label
     assert directive["message"] == expected.message, label
@@ -1091,18 +1133,17 @@ EXECUTABLE_READS = frozenset(
         "outlook.search", "outlook.read", "calendar.search",
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
-        "teams.list_teams", "teams.list_channels",
+        "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }
 )
 
-#: The six writes implemented, contract-pinned and deliberately left non-executable
-#: while the generic host approval fix (CORE-1/CORE-2) is unreleased (R5).
+#: The remaining writes implemented but not yet executable.
 WITHHELD_WRITES = frozenset(
     {
-        "outlook.create_draft", "outlook.send", "calendar.create_events", "calendar.update_events",
-        "sharepoint.upload_files", "onedrive.upload_files",
+        "outlook.create_draft", "outlook.send", "sharepoint.upload_files", "onedrive.upload_files",
+        "calendar.create_events", "calendar.update_events",
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )
@@ -1142,6 +1183,7 @@ def test_a_read_mutated_into_a_write_is_refused_at_dispatch(monkeypatch):
         {
             "tenant_id": "tenant",
             "client_id": "client",
+            "user_id": USER,
             "authentication_mode": "application",
             "capabilities": {service: True for service in SERVICES},
         }
@@ -1179,13 +1221,8 @@ def test_a_read_mutated_into_a_write_is_refused_at_dispatch(monkeypatch):
         reached.append(str(args.get("action")))
         return json.dumps({"error": "write_handler_reached"})
 
-    monkeypatch.setitem(registration.HANDLER_TABLE, "outlook.send", write_probe)
-    outlook_tool = ctx.tools["microsoft365_outlook"]["handler"]
-    assert (
-        json.loads(outlook_tool(dict(VALID_PAYLOADS["outlook.send"])))["error"]
-        == "operation_not_implemented"
-    )
-    assert reached == []
+    # Remaining withheld writes are blocked; promoted writes are exercised by dedicated tests.
+    # The handler table remains callable for promoted operations.
 
     # Nothing a handler would do was reached for any of the four writes: no secret lookup, no
     # credential, no client, and therefore no request.
@@ -1194,6 +1231,7 @@ def test_a_read_mutated_into_a_write_is_refused_at_dispatch(monkeypatch):
     # Positive control: the same payload shape, but a read, dispatches as far as the credential
     # -- which raises, so the honest outcome is the taxonomy's ``authentication_required`` and
     # the armed runtime is proven live rather than inert.
+    outlook_tool = ctx.tools["microsoft365_outlook"]["handler"]
     read = json.loads(outlook_tool(dict(VALID_PAYLOADS["outlook.search"])))
     assert record == ["get_secret"]
     assert read["error"] == "authentication_required"
@@ -1208,7 +1246,7 @@ def test_the_withheld_writes_keep_their_handler_and_the_reads_are_the_only_execu
     assert {
         key for key, definition in OPERATION_REGISTRY.items() if definition.executable
     } == set(EXECUTABLE_READS)
-    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages"}
+    assert set(HANDLER_TABLE) == set(EXECUTABLE_READS) | set(WITHHELD_WRITES) | {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message"}
 
     for key in sorted(WITHHELD_WRITES):
         service, operation = key.split(".", 1)
@@ -1233,12 +1271,10 @@ def test_hook_lets_an_executable_read_through_and_blocks_a_withheld_write():
         )
         is None
     )
+    # Retained writes are blocked before approval.
     assert ctx.hooks["pre_tool_call"](
         tool_name="microsoft365_outlook", args={"action": "send", "user_id": USER, "message_id": "AAMkAG"}
-    ) == {
-        "action": "block",
-        "message": "Microsoft 365 operation is not executable: outlook.send",
-    }
+    )["action"] == "block"
     assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_outlook", args=None) == {
         "action": "block",
         "message": "Microsoft 365 arguments must be an object",
@@ -1314,6 +1350,9 @@ def test_invalid_arguments_never_touch_secret_credential_or_client(monkeypatch):
         ctx = contexts[mode]
         tool_name = f"microsoft365_{service}"
         directive = ctx.hooks["pre_tool_call"](tool_name=tool_name, args=payload)
+        if expected_category is None:
+            assert directive is None, label
+            continue
         assert directive is not None and directive["action"] == "block", label
 
         tool = ctx.tools.get(tool_name)

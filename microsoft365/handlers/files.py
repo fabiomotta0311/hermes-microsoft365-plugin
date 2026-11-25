@@ -17,11 +17,18 @@ Action-specific rules this module owns (what the shared argument contract cannot
 * ``read`` addresses one drive item by an opaque ``item_id`` or a validated relative
   ``item_path``, through ``microsoft365.files.drive_item_address`` — the generated builder
   renders the path and percent-encodes it, never this module.
-* ``download_files``/``upload_files`` go through the bounded ``microsoft365/files.py``
-  transfer: exact bytes, the 10 MiB simple-transfer bound before allocation, the content type
-  of a download read from authenticated metadata only, and an upload whose ``overwrite`` is
-  ``False`` is refused because a simple ``PUT /content`` always replaces its target (a
-  conflict-safe upload needs an upload session, which is not implemented).
+* ``download_files``/``upload_files`` go through the bounded ``microsoft365/files.py``/
+  ``microsoft365/download_range.py`` transfer. Downloads at or under
+  ``download_range.SMALL_DOWNLOAD_BUDGET_BYTES`` (2 MiB) are fetched through a real
+  bounded-streaming transport (preauthenticated URL, separate unauthenticated client, strict
+  byte budget enforced during the read, pre/post metadata pinned by id+eTag); anything larger
+  still fails closed (``download_range_not_implemented``) until a bounded host artifact sink
+  exists to carry a larger file without fully buffering it. Uploads enforce the 10 MiB
+  simple-transfer bound before allocation, with the content type of a download read from
+  authenticated metadata only, and an upload whose size exceeds the simple-transfer bound is
+  *not* refused -- it is routed through the resumable upload session in
+  ``microsoft365/upload_session.py``, which is also what carries the explicit
+  ``conflict_behavior`` (``replace``/``rename``/``fail``) a simple ``PUT /content`` cannot honor.
 
 The four reads above are executable; the two uploads are implemented, contract-pinned and
 exercised offline through the seam, and deliberately **not executable** until the generic
@@ -32,8 +39,17 @@ from __future__ import annotations
 from typing import Mapping
 
 from ..execution import execute_request
-from ..files import download_file, drive_item_address, upload_file
+from ..download_range import download_file_auto
+from ..files import drive_item_address
+from ..reconciliation import reconcile_drive_item
 from ..paging import paginate
+from ..upload_session import (
+    DEFAULT_CHUNK_SIZE,
+    put_chunk_default,
+    sleep_default,
+    upload_file_auto,
+    validate_conflict_behavior,
+)
 from . import (
     HandlerContext,
     collection_payload,
@@ -173,7 +189,12 @@ def _drive_download(arguments: Mapping, context: HandlerContext, *, key: str) ->
     drive_item_address(drive_item_id=arguments.get("item_id"), path=arguments.get("item_path"))
 
     client, _adapter = open_graph_client(context)
-    result = download_file(
+    # Small files (<= download_range.SMALL_DOWNLOAD_BUDGET_BYTES) are fetched through the
+    # bounded-streaming preauthenticated-URL transport, with the final result re-verified
+    # against freshly re-read metadata. Anything larger still fails closed with
+    # ``download_range_not_implemented``: there is no bounded host artifact sink yet to carry
+    # a larger file without fully buffering it.
+    result = download_file_auto(
         client,
         drive_id=drive_id,
         drive_item_id=arguments.get("item_id"),
@@ -194,32 +215,86 @@ def onedrive_download_files(arguments: Mapping, context: HandlerContext) -> dict
     return _drive_download(arguments, context, key=ONEDRIVE_DOWNLOAD)
 
 
+def _upload_strategy(arguments: Mapping, *, key: str) -> tuple[str, int | None]:
+    """Resolve the upload strategy from the caller's conflict request.
+
+    ``conflict_behavior`` is the definitive name: ``replace`` keeps the historical simple-PUT
+    behavior (also selected by the legacy ``overwrite=True``), ``fail`` and ``rename`` require
+    the upload session because a simple ``PUT /content`` cannot express them.
+    """
+    legacy = arguments.get("overwrite")
+    behavior = arguments.get("conflict_behavior")
+    if legacy is not None and behavior is not None:
+        # Refused rather than letting one silently outrank the other: the caller stated two
+        # different intents and whichever won would be a surprise.
+        refuse(
+            "validation_error",
+            f"{key}: pass conflict_behavior or the deprecated overwrite, not both",
+        )
+    if legacy is not None:
+        if type(legacy) is not bool:
+            refuse("validation_error", f"{key}: overwrite must be a boolean")
+        behavior = "replace" if legacy else "fail"
+    if behavior is None:
+        return "replace", None
+    return validate_conflict_behavior(behavior), None
+
+
 def _drive_upload(arguments: Mapping, context: HandlerContext, *, key: str) -> dict:
     drive_id = identifier(arguments, "drive_id", operation=key)
     drive_item_address(drive_item_id=arguments.get("item_id"), path=arguments.get("item_path"))
-    overwrite = arguments.get("overwrite")
-    if overwrite is False:
-        # A simple PUT /content always replaces its target; a conflict-safe upload needs an
-        # upload session with a conflictBehavior, which this plugin does not implement.
-        refuse(
-            "validation_error",
-            f"{key}: overwrite=False cannot be honored by a simple content upload, which always "
-            "replaces the target; a conflict-safe upload needs an upload session, which is not "
-            "implemented",
-        )
+    behavior, _ = _upload_strategy(arguments, key=key)
     content_base64 = arguments.get("content_base64")
     content_type = arguments.get("content_type") or DEFAULT_UPLOAD_CONTENT_TYPE
+    chunk_size = arguments.get("chunk_size")
 
     client, _adapter = open_graph_client(context)
-    result = upload_file(
+    result = upload_file_auto(
         client,
         drive_id=drive_id,
         content_base64=content_base64,
         content_type=content_type,
         drive_item_id=arguments.get("item_id"),
         path=arguments.get("item_path"),
+        conflict_behavior=behavior,
+        chunk_size=DEFAULT_CHUNK_SIZE if chunk_size is None else chunk_size,
+        put=put_chunk_default,
+        sleep=sleep_default,
     )
-    return success_payload(key, result)
+
+    # A 2xx means the request was accepted, not that the bytes are there. The write is
+    # confirmed against the server's own state before this payload claims success; a caller
+    # that must skip the extra read can say so explicitly.
+    if arguments.get("verify") is False:
+        payload = success_payload(key, result)
+        payload["reconciliation"] = {"status": "skipped"}
+        return payload
+
+    path = arguments.get("item_path")
+    declared = result.get("size_bytes") if isinstance(result, Mapping) else None
+    verdict = reconcile_drive_item(
+        client,
+        drive_id=drive_id,
+        drive_item_id=arguments.get("item_id"),
+        path=path,
+        expected_size=declared if isinstance(declared, int) else None,
+        expected_name=_declared_file_name(path),
+    )
+    payload = success_payload(key, result)
+    payload["reconciliation"] = verdict.to_result()
+    return payload
+
+
+def _declared_file_name(path) -> str | None:
+    """The name the caller asked for, from the same relative path the write addressed.
+
+    Only a path-shaped request names its own target; an upload addressed by an opaque
+    ``item_id`` declares no name, and reconciliation then checks what it can (the size)
+    rather than inventing one.
+    """
+    if not isinstance(path, str) or not path:
+        return None
+    return path.rstrip("/").rpartition("/")[2] or None
 
 
 @handler("sharepoint", "upload_files")

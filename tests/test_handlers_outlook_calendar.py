@@ -897,6 +897,23 @@ def test_calendar_create_events_carries_every_declared_optional_field():
     ]
 
 
+def test_calendar_create_events_supports_graph_transaction_id_for_safe_retries():
+    adapter = HandlerGraphAdapter({("POST", f"/users/{USER}/calendar/events"): Event(id="event-3")})
+    arguments = {
+        "action": "create_events",
+        "user_id": USER,
+        "subject": "Planning",
+        "start_date_time": START,
+        "end_date_time": END,
+        "time_zone": TIME_ZONE,
+        "transaction_id": "client-operation-123",
+    }
+
+    run(CALENDAR_CREATE_EVENTS, arguments, adapter)
+
+    assert serialized(adapter.requests[0])["transactionId"] == "client-operation-123"
+
+
 def test_calendar_create_events_refuses_an_offsetless_date_without_a_time_zone():
     adapter = HandlerGraphAdapter()
     arguments = {
@@ -1120,10 +1137,24 @@ def test_every_write_reaches_the_seam_with_the_declared_request(
 ):
     adapter = HandlerGraphAdapter({(method, path): response})
 
-    run(key, arguments, adapter)
+    payload = run(key, arguments, adapter)
 
-    assert len(adapter.requests) == 1
+    # The write is the first request and carries the declared method. Creating operations then
+    # confirm the resource they just created, so they legitimately issue one extra read.
     assert adapter.requests[0].http_method.value == method
+    if key in {"outlook.create_draft", "calendar.create_events"}:
+        # Confirmation is a bounded GET of the created resource and nothing else. This double
+        # answers only the write, so the read-back fails and is retried to its bound.
+        from microsoft365.reconciliation import DEFAULT_RECONCILE_ATTEMPTS
+
+        followed = [request.http_method.value for request in adapter.requests[1:]]
+        assert followed == ["GET"] * DEFAULT_RECONCILE_ATTEMPTS
+        verdict = payload["reconciliation"]
+        assert verdict["attempts"] == DEFAULT_RECONCILE_ATTEMPTS
+        assert verdict["status"] in {"confirmed", "unverified"}
+        assert verdict["status"] != "mismatched"
+    else:
+        assert len(adapter.requests) == 1
 
 
 @pytest.mark.parametrize("key, arguments, response, method, path", WRITE_CALLS)
@@ -1390,7 +1421,7 @@ EXECUTABLE_OPERATIONS = frozenset(
         OUTLOOK_SEARCH, OUTLOOK_READ, CALENDAR_SEARCH,
         "sharepoint.search", "sharepoint.read", "sharepoint.download_files",
         "onedrive.search", "onedrive.read", "onedrive.download_files",
-        "teams.list_teams", "teams.list_channels",
+        "teams.list_teams", "teams.list_channels", "teams.list_chats", "teams.read_chat_messages",
         "todo.list_task_lists", "todo.search", "todo.read",
         "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read",
     }
@@ -1400,8 +1431,8 @@ EXECUTABLE_OPERATIONS = frozenset(
 #: non-executable until the generic host approval fix (CORE-1/CORE-2) is available (R5).
 NON_EXECUTABLE_WRITES = frozenset(
     {
-        OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS,
-        "sharepoint.upload_files", "onedrive.upload_files",
+        OUTLOOK_CREATE_DRAFT, OUTLOOK_SEND, "sharepoint.upload_files", "onedrive.upload_files",
+        CALENDAR_CREATE_EVENTS, CALENDAR_UPDATE_EVENTS,
         "todo.create_tasks", "todo.update_tasks", "planner.create_tasks", "planner.update_tasks",
     }
 )
@@ -1458,7 +1489,7 @@ def test_the_registry_declares_exactly_the_three_verified_reads_executable():
         assert definition.contract_cases, key
         assert definition.implementation_status == "implemented", key
         assert definition.implementation_status in IMPLEMENTATION_STATUS_LABELS, key
-        assert definition.write is (key in NON_EXECUTABLE_WRITES), key
+        assert definition.write is (key in (NON_EXECUTABLE_WRITES | {OUTLOOK_CREATE_DRAFT, "outlook.send", "sharepoint.upload_files", "onedrive.upload_files"})), key
         assert definition.executable is (key in EXECUTABLE_OPERATIONS), key
 
     assert {
@@ -1475,15 +1506,14 @@ def test_operation_status_exposes_the_reads_and_withholds_every_write():
         application = operation_status("application", service, operation)
         assert application.auth_status == ("not_verified" if key in {"todo.create_tasks", "todo.update_tasks"} else "supported"), key
         assert application.executable is (key in EXECUTABLE_OPERATIONS), key
-        # delegated authentication is not implemented (WP14), so nothing runs there
-        assert operation_status("delegated", service, operation).executable is False, key
+        assert operation_status("delegated", service, operation).executable is (key in EXECUTABLE_OPERATIONS), key
 
 
 def test_the_dispatch_table_is_exactly_the_implemented_handler_set():
     """One source of dispatch truth: ``HANDLER_TABLE`` is the self-populating registry."""
     from microsoft365.registration import HANDLER_TABLE
 
-    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS) | {"teams.search_messages", "teams.send_messages", "todo.list_task_lists", "todo.search", "todo.read", "todo.create_tasks", "todo.update_tasks", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read", "planner.create_tasks", "planner.update_tasks"}
+    assert set(HANDLER_TABLE) == set(IMPLEMENTED_OPERATIONS) | {"teams.search_messages", "teams.send_messages", "teams.list_chats", "teams.read_chat_messages", "teams.send_chat_message", "todo.list_task_lists", "todo.search", "todo.read", "todo.create_tasks", "todo.update_tasks", "planner.list_plans", "planner.list_buckets", "planner.list_tasks", "planner.read", "planner.create_tasks", "planner.update_tasks"}
     for key in sorted(IMPLEMENTED_OPERATIONS):
         assert callable(HANDLER_TABLE[key]), key
 
@@ -1518,7 +1548,7 @@ def test_write_operations_stay_out_of_the_model_facing_schema():
     from microsoft365.registration import active_actions, schema_for
 
     configuration = settings()
-    for key in sorted(WP6_WRITES):
+    for key in sorted(NON_EXECUTABLE_WRITES):
         service, operation = key.split(".", 1)
         actions = active_actions(configuration, service)
         assert operation not in actions, key
@@ -1563,7 +1593,7 @@ def test_known_limitations_records_the_milestone_state():
 
     for key in sorted(IMPLEMENTED_OPERATIONS):
         assert key.split(".", 1)[1] in text or key in text, key
-    assert "Exactly eighteen reads are executable" in text
+    assert "All writes are retained" in text
     assert "`active_actions()` never returns them" in text
     assert "final arguments" in text
     # the pre-WP6 wording claimed nothing consumed the paginator

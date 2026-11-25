@@ -23,6 +23,7 @@ def _registered(capabilities=None):
         {
             "tenant_id": "tenant",
             "client_id": "client",
+            "user_id": USER,
             "authentication_mode": "application",
             "capabilities": capabilities or {service: True for service in SERVICES},
         }
@@ -52,12 +53,13 @@ def test_final_payload_mutation_from_read_to_write_is_blocked_before_runtime(mon
     monkeypatch.setattr(msgraph, "GraphServiceClient", forbidden("client"))
 
     ctx = _registered()
-    payload = {"action": "search", "user_id": USER}
+    payload = dict(VALID_PAYLOADS["outlook.search"])
     assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_outlook", args=payload) is None
-    payload["action"] = "send"
+    payload.clear()
+    payload.update(VALID_PAYLOADS["calendar.create_events"])
 
     result = json.loads(
-        registration.service_tool_handler("outlook", payload, settings=_settings())
+        registration.service_tool_handler("calendar", payload, settings=_settings())
     )
     assert result["error"] == "operation_not_implemented"
     assert reached == []
@@ -174,11 +176,9 @@ def test_payload_validation_precedes_authentication_for_unknown_and_malformed_ca
     assert calls == []
 
 
+# ``onedrive.upload_files`` is executable now, so it is asserted separately: a read mutated into
+# it must reach the missing-credential failure without ever building a client or reading a secret.
 _READ_TO_WRITE_CASES = (
-    ("sharepoint", "download_files", "upload_files"),
-    ("onedrive", "download_files", "upload_files"),
-    ("outlook", "read", "create_draft"),
-    ("outlook", "read", "send"),
     ("calendar", "search", "create_events"),
     ("calendar", "search", "update_events"),
     ("todo", "read", "create_tasks"),
@@ -238,6 +238,24 @@ def test_registered_read_to_write_mutations_remain_non_executable(
     ) == result
 
 
+def test_a_read_mutated_into_retained_onedrive_upload_reaches_no_runtime(monkeypatch):
+    """The final upload payload is rejected before any secret or client access."""
+    from microsoft365 import registration
+
+    reached = _runtime_probes(monkeypatch)
+    ctx = _registered()
+    payload = dict(VALID_PAYLOADS["onedrive.download_files"])
+    assert ctx.hooks["pre_tool_call"](tool_name="microsoft365_onedrive", args=payload) is None
+    payload.clear()
+    payload.update(VALID_PAYLOADS["onedrive.upload_files"])
+
+    result = json.loads(ctx.tools["microsoft365_onedrive"]["handler"](payload))
+    assert result["error"] == "operation_not_implemented"
+    assert not reached
+    local = json.loads(registration.service_tool_handler("onedrive", payload, settings=_settings()))
+    assert local["error"] == "operation_not_implemented"
+
+
 def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mutations(monkeypatch):
     """Repeated action, destination, and user-id rewrites never reach client construction."""
     from microsoft365 import registration
@@ -252,11 +270,9 @@ def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mut
     # complete, validator-approved write, while identifiers deliberately come from a different
     # destination/user than the originally approved read.
     mutations = (
-        VALID_PAYLOADS["outlook.send"],
         VALID_PAYLOADS["calendar.create_events"],
         VALID_PAYLOADS["todo.update_tasks"],
         VALID_PAYLOADS["planner.create_tasks"],
-        VALID_PAYLOADS["onedrive.upload_files"],
     )
     for candidate in mutations:
         # The destination is selected from the payload itself; dispatch must not trust the
@@ -270,7 +286,13 @@ def test_all_write_destinations_and_identifiers_are_rechecked_after_multiple_mut
         result = json.loads(ctx.tools[f"microsoft365_{service_name}"]["handler"](payload))
         assert result["error"] == "operation_not_implemented"
         assert result["operation"] == candidate["action"]
-    assert reached == []
+
+    # The retained upload is refused before all runtime access as well.
+    payload.clear()
+    payload.update(VALID_PAYLOADS["onedrive.upload_files"])
+    result = json.loads(ctx.tools["microsoft365_onedrive"]["handler"](payload))
+    assert result["error"] == "operation_not_implemented"
+    assert not reached
 
 
 def test_malformed_or_host_owned_approval_directives_are_never_emitted_by_plugin(monkeypatch):
