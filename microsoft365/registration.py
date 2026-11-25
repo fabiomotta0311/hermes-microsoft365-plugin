@@ -100,9 +100,8 @@ def tool_result(payload: Any) -> str | dict:
         and isinstance(payload.get("content"), list)
     ):
         return payload
-    # ``default=str`` keeps a payload carrying a non-JSON value (a datetime, a Path, an
-    # SDK object) readable at the boundary instead of raising a TypeError into the host.
-    return json.dumps(payload, default=str)
+    # Never invoke application-defined __str__ or __repr__ for opaque values.
+    return json.dumps(payload, default=lambda _: "[unsupported value]")
 
 
 def unavailable_handler(args, *, service: str) -> str:
@@ -264,7 +263,7 @@ def register_plugin(ctx) -> None:
 
     def preflight_handler(args, **kwargs):
         del args, kwargs
-        return json.dumps(build_preflight(settings, configuration_errors=errors), default=str)
+        return json.dumps(build_preflight(settings, configuration_errors=errors), default=lambda _: "[unsupported value]")
 
     ctx.register_tool(
         name="microsoft365_preflight",
