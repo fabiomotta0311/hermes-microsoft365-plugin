@@ -598,8 +598,13 @@ source = { editable = "." }
 dependencies = [
     { name = "azure-identity" },
     { name = "microsoft-kiota-abstractions" },
+    { name = "microsoft-kiota-authentication-azure" },
     { name = "microsoft-kiota-http" },
+    { name = "microsoft-kiota-serialization-form" },
     { name = "microsoft-kiota-serialization-json" },
+    { name = "microsoft-kiota-serialization-multipart" },
+    { name = "microsoft-kiota-serialization-text" },
+    { name = "msgraph-core" },
     { name = "msgraph-sdk" },
 ]
 
@@ -618,8 +623,13 @@ requires-dist = [
     { name = "detect-secrets", marker = "extra == 'test'", specifier = "==1.5.0" },
     { name = "fastapi", marker = "extra == 'test'", specifier = "==0.115.6" },
     { name = "microsoft-kiota-abstractions", specifier = "==1.14.2" },
+    { name = "microsoft-kiota-authentication-azure", specifier = "==1.12.3" },
     { name = "microsoft-kiota-http", specifier = "==1.14.2" },
+    { name = "microsoft-kiota-serialization-form", specifier = "==1.12.3" },
     { name = "microsoft-kiota-serialization-json", specifier = "==1.14.2" },
+    { name = "microsoft-kiota-serialization-multipart", specifier = "==1.12.3" },
+    { name = "microsoft-kiota-serialization-text", specifier = "==1.12.3" },
+    { name = "msgraph-core", specifier = "==1.5.1" },
     { name = "msgraph-sdk", specifier = "==1.64.0" },
     { name = "pip-audit", marker = "extra == 'test'", specifier = "==2.10.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = "==9.1.1" },
