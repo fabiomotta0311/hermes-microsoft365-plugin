@@ -115,7 +115,7 @@ INVALID_CONTENT_TYPE = "invalid_content_type"
 #: Static (never interpolated) next step per status: what a caller can actually do about it.
 _ACTIONS = {
     UPLOAD_SESSION_NOT_IMPLEMENTED: "upload the file through a drive upload session instead",
-    DOWNLOAD_RANGE_NOT_IMPLEMENTED: "download the file in ranges instead of one content request",
+    DOWNLOAD_RANGE_NOT_IMPLEMENTED: "download a file within the 10 MiB simple-transfer limit",
     DECLARED_SIZE_MISMATCH: "re-read the item metadata and retry the download",
     NOT_A_FILE: "address a file, not a folder or a non-file drive item",
 }

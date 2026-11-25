@@ -184,7 +184,7 @@ def _drive_download(arguments: Mapping, context: HandlerContext, *, key: str) ->
 
     client, _adapter = open_graph_client(context)
     # ``auto`` picks the smallest mechanism that can carry the file: one GET within the simple
-    # bound, aligned ranged reads above it. Both return the same BinaryResult contract.
+    # bound; larger downloads fail closed until bounded streaming is implemented.
     result = download_file_auto(
         client,
         drive_id=drive_id,
