@@ -46,6 +46,82 @@ def test_failed_handoff_is_retried_then_deduplicated():
     assert len(attempts) == 2
 
 
+@pytest.mark.parametrize('rebind', [False, True])
+def test_binding_change_before_admission_lock_never_routes_to_old_session(rebind):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from tests.test_teams_webhook import application, call, identity, registry_with_binding
+
+    queued, proceed = threading.Event(), threading.Event()
+    registry = registry_with_binding()
+    underlying = registry._delivery_lock
+
+    class GatedLock:
+        def __enter__(self):
+            if threading.current_thread().name.startswith('inbound-test'):
+                queued.set()
+                assert proceed.wait(5)
+            underlying.acquire()
+            return self
+
+        def __exit__(self, *args):
+            underlying.release()
+
+    registry._delivery_lock = GatedLock()
+    delivered = []
+    app = application(registry=registry, on_activity=lambda decision: delivered.append(decision.session_id))
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix='inbound-test') as pool:
+        future = pool.submit(call, app)
+        try:
+            assert queued.wait(5)
+            assert registry.unbind(identity())
+            if rebind:
+                registry.bind(identity(), 'session-2')
+        finally:
+            proceed.set()
+        result = future.result(timeout=5)
+    if rebind:
+        assert result[2] == {'status': 'accepted'}
+        assert delivered == ['session-2']
+    else:
+        assert result[0] != 200
+        assert delivered == []
+
+
+def test_unbind_waits_for_inflight_handoff():
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    from tests.test_teams_webhook import application, call, identity, registry_with_binding
+
+    entered, release, unbind_started = threading.Event(), threading.Event(), threading.Event()
+    registry = registry_with_binding()
+    delivered = []
+
+    def handoff(decision):
+        delivered.append(decision.session_id)
+        entered.set()
+        assert release.wait(5)
+
+    def unbind():
+        unbind_started.set()
+        return registry.unbind(identity())
+
+    app = application(registry=registry, on_activity=handoff)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(call, app)
+        try:
+            assert entered.wait(5)
+            removal = pool.submit(unbind)
+            assert unbind_started.wait(5)
+            with pytest.raises(TimeoutError):
+                removal.result(timeout=0.1)
+        finally:
+            release.set()
+        assert first.result(timeout=5)[2] == {'status': 'accepted'}
+        assert removal.result(timeout=5) is True
+    assert delivered == ['session-1']
+
+
 def test_concurrent_duplicate_waits_for_handoff_before_acknowledging():
     import threading
     from concurrent.futures import ThreadPoolExecutor

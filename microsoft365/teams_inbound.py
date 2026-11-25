@@ -439,24 +439,26 @@ class ConversationRegistry:
         if not isinstance(session_id, str) or not session_id.strip():
             raise InboundTeamsError("validation_error", status=INVALID_ACTIVITY)
         key = identity.as_key()
-        existing = self._bindings.get(key)
-        if existing is not None and existing != session_id:
-            raise InboundTeamsError("validation_error", status=IDENTITY_BOUND_TO_ANOTHER_SESSION)
-        self._bindings[key] = session_id
-        self._sessions.setdefault(session_id, set()).add(key)
+        with self._delivery_lock:
+            existing = self._bindings.get(key)
+            if existing is not None and existing != session_id:
+                raise InboundTeamsError("validation_error", status=IDENTITY_BOUND_TO_ANOTHER_SESSION)
+            self._bindings[key] = session_id
+            self._sessions.setdefault(session_id, set()).add(key)
 
     def unbind(self, identity: Identity) -> bool:
         """Remove a binding. Returns whether one existed."""
         key = identity.as_key()
-        session_id = self._bindings.pop(key, None)
-        if session_id is None:
-            return False
-        bound = self._sessions.get(session_id)
-        if bound is not None:
-            bound.discard(key)
-            if not bound:
-                self._sessions.pop(session_id, None)
-        return True
+        with self._delivery_lock:
+            session_id = self._bindings.pop(key, None)
+            if session_id is None:
+                return False
+            bound = self._sessions.get(session_id)
+            if bound is not None:
+                bound.discard(key)
+                if not bound:
+                    self._sessions.pop(session_id, None)
+            return True
 
     def session_for(self, identity: Identity) -> str:
         """The session bound to an identity, or a refusal when there is none.
@@ -569,16 +571,16 @@ def admit_activity(
     )
     activity = parse_activity(payload)
     identity = identity_of(activity)
-    session_id = registry.session_for(identity)
 
     if activity.activity_id is None:
         # An Activity with no id cannot be deduplicated, so it is refused rather than delivered
         # twice on a retry: "cannot tell" must not become "deliver anyway".
         raise InboundTeamsError("validation_error", status=INVALID_ACTIVITY)
 
-    # Serialize check, handoff and commit. A failed handoff leaves the id retryable;
-    # callbacks must not re-enter admission on the same registry.
+    # Serialize binding lookup, check, handoff and commit against bind/unbind.
+    # A failed handoff leaves the id retryable; callbacks must not re-enter this registry.
     with registry._delivery_lock:
+        session_id = registry.session_for(identity)
         if registry.already_delivered(activity.activity_id):
             return InboundDecision(session_id, identity, activity, duplicate=True)
         decision = InboundDecision(session_id, identity, activity, duplicate=False)
