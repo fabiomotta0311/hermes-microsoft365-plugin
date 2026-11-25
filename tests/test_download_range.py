@@ -445,56 +445,23 @@ def test_a_small_file_is_downloaded_in_one_request_with_no_range_header():
     assert [window for window in capture if window[0] != "metadata"] == [("whole", None)]
 
 
-def test_a_large_file_is_downloaded_through_aligned_ranges():
-    import base64
-
-    size = 25 * MB
-    capture: list = []
-    adapter, payload = ranged_adapter(size, capture=capture)
-    client = _drive_client(adapter)
-    result = download_file_auto(
-        client, drive_id="drive-1", path="big.bin"
-    )
-    assert result.size == size
-    assert result.content_type == "application/octet-stream"
-    assert base64.b64decode(result.content_base64) == payload
-    assert [window for window in capture if window[0] not in {"metadata", "whole"}] == list(
-        planned_ranges(size, DEFAULT_RANGE_SIZE)
-    )
+def test_large_download_fails_closed_before_any_content_request():
+    capture = []
+    adapter, _ = ranged_adapter(12 * MB, capture=capture)
+    with pytest.raises(DownloadRangeError) as exc:
+        download_file_auto(_drive_client(adapter), drive_id="drive-1", path="big.bin")
+    assert exc.value.status == "download_range_not_implemented"
+    assert capture == [("metadata", None)]
 
 
-def test_an_explicit_range_size_is_honored():
-    size = 12 * MB
-    capture: list = []
-    adapter, _ = ranged_adapter(size, capture=capture)
-    client = _drive_client(adapter)
-    download_file_auto(
-        client,
-        drive_id="drive-1",
-        path="big.bin",
-        range_size=RANGE_SIZE_MULTIPLE,
-    )
-    assert [window for window in capture if window[0] not in {"metadata", "whole"}] == list(
-        planned_ranges(size, RANGE_SIZE_MULTIPLE)
-    )
-
-
-def test_the_ranged_path_sets_only_a_range_header():
-    """Credentials travel in the client's transport; this code path adds no Authorization header."""
-    seen: list = []
-    # Above the 10 MiB simple bound, so the ranged path is the one under test.
-    size = 25 * MB
-    adapter, _ = ranged_adapter(size, capture=[])
-    inner = adapter._responder
-
-    def spy(request_information):
-        headers = getattr(request_information, "headers", None)
-        seen.append({str(key).lower() for key in (headers.keys() if headers else ())})
-        return inner(request_information)
-
-    adapter._responder = spy
-    client = _drive_client(adapter)
-    download_file_auto(client, drive_id="drive-1", path="big.bin")
-    assert seen, "the ranged path issued no request"
-    assert all("Authorization" not in names for names in seen)
-    assert any("range" in names for names in seen)
+def test_injected_fetch_cannot_bypass_large_download_guard():
+    capture = []
+    adapter, _ = ranged_adapter(12 * MB, capture=capture)
+    def forbidden(*args, **kwargs):
+        pytest.fail("experimental fetch must not be called")
+    with pytest.raises(DownloadRangeError) as exc:
+        download_file_auto(_drive_client(adapter), drive_id="drive-1", path="big.bin",
+                           fetch=forbidden, range_size=RANGE_SIZE_MULTIPLE)
+    assert exc.value.category == "operation_not_implemented"
+    assert exc.value.status == "download_range_not_implemented"
+    assert capture == [("metadata", None)]

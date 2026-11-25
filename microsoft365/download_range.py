@@ -1,4 +1,4 @@
-"""Ranged drive downloads: files above the simple-transfer bound, read in verified ranges.
+"""Experimental range helpers and the fail-closed drive download entry point.
 
 Why this module exists
 ----------------------
@@ -8,7 +8,7 @@ contract is bounded at 10 MiB. Anything larger is currently refused with
 :mod:`microsoft365.upload_session` handles the write side, and a plugin that can upload a 2 GiB
 video but not read it back is not production-ready.
 
-Contract (verified against Microsoft Graph driveItem "download contents")
+Experimental design (not a supported or verified production transport)
 -------------------------------------------------------------------------
 1. Read the item's authenticated metadata first: ``GET /drives/{drive-id}/items/{address}``.
    Its ``size``, ``file.mimeType`` and ``name`` are the only sources for the transfer's size
@@ -24,14 +24,12 @@ Security and memory invariants
 ------------------------------
 * Every header this module sets is built from integers it computed; no caller string ever
   reaches a header, so no CRLF injection is possible through a range.
-* A declared size above :data:`MAX_DOWNLOAD_BYTES` is refused **before** the first byte request,
-  and the accumulated payload is checked against the bound as it grows, so a lying server cannot
-  make this buffer without limit.
+* The experimental assembler buffers the complete file and is not safe for production use.
+  The handler never calls it; downloads above 10 MiB fail before any content request.
 * Every failure is a sanitized taxonomy error with a static message plus a bounded ``status``;
   raw Graph text stays in ``__cause__``.
 
-Everything defaults to an injectable seam (``fetch``) so the module is fully exercisable
-offline; production passes nothing and gets the real seam.
+The prototype lacks initial/final version verification and a bounded streaming transport.
 """
 from __future__ import annotations
 
@@ -328,16 +326,7 @@ def download_file_auto(
     fetch: FetchSeam | None = None,
     sleep: Callable[[float], None] | None = None,
 ) -> BinaryResult:
-    """Download one drive file, choosing one-shot or ranged reads by its declared size.
-
-    ``auto`` names the *strategy selection*: the caller's only optional input is
-    ``range_size``, and the mechanism is the smallest one that can carry the file. Both paths
-    return the same :class:`~microsoft365.results.BinaryResult`, so the caller reconciles one
-    result contract either way.
-
-    * declared size within the simple bound -> one ``GET /content`` with no ``Range`` header;
-    * anything larger, up to Graph's ceiling -> aligned ranged reads.
-    """
+    """Download within the simple bound; explicitly refuse larger files."""
     drive = validate_drive_id(drive_id)
     address = drive_item_address(drive_item_id=drive_item_id, path=path, identifier=identifier)
     adapter = _request_adapter(client)
@@ -359,24 +348,15 @@ def download_file_auto(
             name=name,
         )
 
-    window_size = validate_range_size(DEFAULT_RANGE_SIZE if range_size is None else range_size)
-    resolve_fetch = fetch if fetch is not None else fetch_range_default
-    resolve_sleep = sleep if sleep is not None else sleep_default
-    payload = download_ranges(
-        size=declared_size,
-        range_size=window_size,
-        fetch=lambda start, end: resolve_fetch(
-            client,
-            drive_id=drive,
-            drive_item_id=address,
-            start=start,
-            end=end,
-            execute=execute,
-            adapter=adapter,
-        ),
-        sleep=resolve_sleep,
+    # BinaryResult buffers and base64-encodes the entire file; the SDK content
+    # builder also does not expose an HTTP response with status and headers.
+    # Until a bounded streaming result and version-pinned transport exist, do
+    # not issue content requests or call the experimental range helpers.
+    raise DownloadRangeError(
+        "operation_not_implemented", status="download_range_not_implemented",
+        action="download a file within the 10 MiB simple-transfer limit",
+        size_bytes=declared_size, limit_bytes=SIMPLE_TRANSFER_LIMIT_BYTES,
     )
-    return binary_result(payload, content_type=mime_type, name=name)
 
 
 def _range_configuration(start: int, end: int) -> RequestConfiguration:
@@ -396,7 +376,7 @@ def fetch_range_default(
     execute: Callable[..., Any] = execution.execute_request,
     adapter: Any = None,
 ) -> RangeOutcome:
-    """The production ranged-read seam: one ``GET`` per window with a ``Range`` header."""
+    """Experimental seam; not connected to the production download handler."""
     response = execute(
         _content_builder(client, drive_id, drive_item_id),
         method="GET",

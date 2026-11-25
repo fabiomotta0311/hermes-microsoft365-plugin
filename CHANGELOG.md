@@ -14,9 +14,9 @@ All notable changes to this project are documented here.
   upload sessions with aligned 320 KiB fragments, explicit byte ranges, `nextExpectedRanges`
   resume and a bounded attempt budget. A session that stops making progress is reported as
   `upload_session_incomplete` rather than assumed complete.
-- **Verified ranged downloads.** Transfers above the simple ceiling run as aligned ranged reads
-  that require `206`, verify every `Content-Range` against the window requested, and reject a
-  mismatch instead of accepting whole-file bytes as the requested range.
+- **Large downloads fail closed.** Files above the 10 MiB simple-transfer limit return
+  `download_range_not_implemented` without a content request. Experimental range helpers are
+  not a supported streaming transport; version verification is not implemented.
 - **Post-write reconciliation.** Every confirmed write is re-read and reported as `confirmed`,
   `mismatched` or `unverified`; `mismatched` is never repaired or silently retried, and
   `unverified` is never promoted to `confirmed`. Callers may opt out explicitly with
